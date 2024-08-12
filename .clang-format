@@ -1,0 +1,13 @@
+# https://skillupwards.com/blog/formatting-c-cplusplus-code-using-clangformat-and-vscode
+BasedOnStyle: Google
+AccessModifierOffset: -2
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 0
+SortIncludes: false
+SortUsingDeclarations: false
+DerivePointerAlignment: false
+PointerAlignment: Left
+ContinuationIndentWidth: 2
+AlignAfterOpenBracket: DontAlign
