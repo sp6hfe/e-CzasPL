@@ -1,6 +1,6 @@
 # e-CzasPL Radio RF stream data decoder
 
-This module is responsible for retrieving e-CzasPL Radio time frames and decoding encapsulated UTC(PL) official time messages. Input data is a stream of samples being an information about phase change of the 225[kHz] carrier signal of Polish Radio Program 1 long wave broadcast.
+This module is responsible for retrieving [e-CzasPL Radio][1] time frames and decoding encapsulated UTC(PL) official time messages. Input data is a stream of samples being an information about phase change of the 225[kHz] carrier signal of Polish Radio Program 1 long wave broadcast.
 
 ## Time frame
 
@@ -30,7 +30,9 @@ To be added
 
 ## Data scrambling
 
-On tramsmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`. Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
+On transmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`. Out of the magic number only 37 least significant bits are used for scrambling.
+
+Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
 
 On reception side it is needed to reverse the operation by effectively doing the same operation. This time it is called de-scrambling.
 
@@ -45,5 +47,7 @@ No data provided offically
 ## CRC-8
 
 No data provided offically
+
+[1]: https://github.com/e-CzasPL/TimeReceiver225kHz
 
 [timeFrame]: ../../doc/img/eCzasPL_time_frame.jpg "e-CzasPL Radio time frame (source: e-CzasPL documentation)"

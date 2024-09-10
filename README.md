@@ -1,4 +1,4 @@
-# e-CzasPL reference C++ data decoder by SP6HFE
+# e-CzasPL Radio reference C++ data decoder by SP6HFE
 
 This project consist of GNU Radio Companion flow graph to capture 225[kHz] AM boadcast and reference software decoder allowing to extract time frames encoded in broadcast emission using phase shift modulation of its carrier frequency. A time signals broadcasting station is Polish National Radio emiting its Program Pierwszy Polskiego Radia radio program. Due to high transmitting power (1[MW]) signal easily cover whole Poland allowing for Polish official time UTC(PL) dissemination throughout the country. Due to ionospheric reflections radio signal can be received worldwide and that is great because you could learn from this project hands-on even you're not living in Poland.
 
