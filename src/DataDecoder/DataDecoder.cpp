@@ -62,13 +62,43 @@ bool DataDecoder::processNewSample(int16_t sample) {
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
 
     if (timeFrameGetter.has_value()) {
-      const auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
+      auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
+
+      // Check CRC-8 - to be discussed with GUM
+
+      // Lookup and correct errors (Reed-Solomon) - to be discussed with GUM
 
       // validate time frame start byte
       const auto frameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
 
       // validate time frame static bits
       const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
+
+      // descramble the time message
+      if (frameStartByteOk and frameStaticBitsOk) {
+        // _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+
+        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0)
+        static constexpr uint8_t offsetToScramblingWordMsb{3U};  // 3 most significant bits of the 1st byte of the scrambling word array are useless (they are just a fill for the byte-type storage)
+        auto timeFrameByteNo{3U};
+        auto timeFrameByteBitNo{4U};
+        auto timeFrameDataByte{timeFrame.at(timeFrameByteNo)};
+        for (auto scramblingCounter{offsetToScramblingWordMsb}; scramblingCounter < (37U + offsetToScramblingWordMsb); scramblingCounter++) {
+          const auto scramblingByteNo{static_cast<uint8_t>(scramblingCounter / 8U)};
+          const auto scramblingByteBitNo{static_cast<uint8_t>(7U - (scramblingCounter % 8U))};
+          const auto scramblingBit{static_cast<uint8_t>((_scramblingWord.at(scramblingByteNo) >> scramblingByteBitNo) & 0x01)};
+          timeFrameDataByte ^= (scramblingBit << timeFrameByteBitNo);
+
+          if (timeFrameByteBitNo == 0U) {
+            timeFrame.at(timeFrameByteNo) = timeFrameDataByte;
+            timeFrameByteNo++;
+            timeFrameDataByte = timeFrame.at(timeFrameByteNo);
+            timeFrameByteBitNo = 7U;
+          } else {
+            timeFrameByteBitNo--;
+          }
+        }
+      }
 
       // communicate new data
       if (frameStartByteOk and frameStaticBitsOk and _timeFrameCallback) {
