@@ -377,6 +377,11 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
     return {};
   }
 
+  // validate time frame static bits
+  if (not(TIME_FRAME_STATIC_BITS == (dataFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK))) {
+    return {};
+  }
+
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
 }
 
