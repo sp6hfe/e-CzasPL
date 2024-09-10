@@ -45,6 +45,12 @@ public:
   /// @brief Time frame start byte
   static constexpr uint8_t TIME_FRAME_START_BYTE{0x60};
 
+  /// @brief Time frame static bits
+  static constexpr uint8_t TIME_FRAME_STATIC_BITS{0xA0};
+
+  /// @brief Time frame static bits mask
+  static constexpr uint8_t TIME_FRAME_STATIC_BITS_MASK{0xE0};
+
   /// @brief Time frame data container
   using TimeFrame = std::array<uint8_t, TIME_FRAME_BYTES_NO>;
 
