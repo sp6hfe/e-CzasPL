@@ -64,8 +64,14 @@ bool DataDecoder::processNewSample(int16_t sample) {
     if (timeFrameGetter.has_value()) {
       const auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
 
+      // validate time frame start byte
+      const auto frameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+
+      // validate time frame static bits
+      const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
+
       // communicate new data
-      if (_timeFrameCallback) {
+      if (frameStartByteOk and frameStaticBitsOk and _timeFrameCallback) {
         _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
       }
 
@@ -370,16 +376,6 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
     dataFrame.at(dataByteNo) = dataByte;
     byteStartIndex = nextByteStartIndex;
     startingBitValueIsOne = bitValueIsOne;
-  }
-
-  // validate time frame start byte
-  if (not(dataFrame.at(2) == TIME_FRAME_START_BYTE)) {
-    return {};
-  }
-
-  // validate time frame static bits
-  if (not(TIME_FRAME_STATIC_BITS == (dataFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK))) {
-    return {};
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
