@@ -4,7 +4,7 @@ This module is responsible for decoding UTC(PL) official time ensapsulated in ti
 
 ## Scrambling
 
-On tramsmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word. Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
+On tramsmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`. Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
 
 On reception side it is needed to reverse the operation by effectively doing the same operation. This time it is called de-scrambling.
 
