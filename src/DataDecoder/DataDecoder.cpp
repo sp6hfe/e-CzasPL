@@ -63,22 +63,32 @@ bool DataDecoder::processNewSample(int16_t sample) {
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
 
     if (timeFrameGetter.has_value()) {
-      TimeData timeData{.utcTimestamp = 0U, .utcUnixTimestamp = 0U, .offset = LocalTimeOffset::OffsetPlus0h};
-
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
 
       // Check CRC-8 - to be discussed with GUM
 
       // Lookup and correct errors (Reed-Solomon) - to be discussed with GUM
 
-      // validate time frame start byte
-      const auto frameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+      // validate synchronization word
+      const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
 
-      // validate time frame static bits
-      const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
+      // validate time frame start byte
+      const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+
+      // validate time frame static bits (3 MSb of byte 3 is 0b101)
+      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
 
       // descramble the time message and extract the timestamp
-      if (frameStartByteOk and frameStaticBitsOk) {
+      if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
+        TimeData timeData{
+          .utcTimestamp = 0U,
+          .utcUnixTimestamp = 0U,
+          .offset = TimeZoneOffset::OffsetPlus0h,
+          .timeZoneChangeAnnouncement = false,
+          .leapSecondAnnounced = false,
+          .leapSecondPositive = false,
+          .transmitterState = TransmitterState::NormalOperation};
+
         // printf("\n>Original frame:    ");
         // printFrameContent(timeFrame);
 
@@ -118,23 +128,47 @@ bool DataDecoder::processNewSample(int16_t sample) {
         const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
         switch (timeOffset) {
           case 0x01:
-            timeData.offset = LocalTimeOffset::OffsetPlus2h;
+            timeData.offset = TimeZoneOffset::OffsetPlus2h;
             break;
           case 0x02:
-            timeData.offset = LocalTimeOffset::OffsetPlus1h;
+            timeData.offset = TimeZoneOffset::OffsetPlus1h;
             break;
           case 0x03:
-            timeData.offset = LocalTimeOffset::OffsetPlus3h;
+            timeData.offset = TimeZoneOffset::OffsetPlus3h;
             break;
           default:
-            timeData.offset = LocalTimeOffset::OffsetPlus0h;
+            timeData.offset = TimeZoneOffset::OffsetPlus0h;
             break;
         }
-      }
 
-      // communicate received time data
-      if (frameStartByteOk and frameStaticBitsOk and _timeDataCallback) {
-        _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
+        // get time zone change announcement (bit TZC(2))
+        timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
+
+        // extract leap second related information (bits LS(4) and LSS(3))
+        timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
+        timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
+
+        // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
+        const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
+        switch (transmitterState) {
+          case 0x01:
+            timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
+            break;
+          case 0x02:
+            timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
+            break;
+          case 0x03:
+            timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
+            break;
+          default:
+            timeData.transmitterState = TransmitterState::NormalOperation;
+            break;
+        }
+
+        // communicate received time data
+        if (_timeDataCallback) {
+          _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
+        }
       }
 
       // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
