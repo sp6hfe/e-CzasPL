@@ -92,6 +92,8 @@ private:
 
   std::array<uint32_t, STREAM_SIZE> _sampleNo{};
 
+  const std::array<uint8_t, 5> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
+
   TimeFrameCallback _timeFrameCallback{nullptr};
 
   uint8_t _streamSamplesPerBit;

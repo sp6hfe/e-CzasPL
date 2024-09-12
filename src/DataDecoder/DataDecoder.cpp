@@ -62,10 +62,31 @@ bool DataDecoder::processNewSample(int16_t sample) {
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
 
     if (timeFrameGetter.has_value()) {
-      const auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
+      auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
+
+      // Check CRC-8 - to be discussed with GUM
+
+      // Lookup and correct errors (Reed-Solomon) - to be discussed with GUM
+
+      // validate time frame start byte
+      const auto frameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+
+      // validate time frame static bits
+      const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
+
+      // descramble the time message
+      if (frameStartByteOk and frameStaticBitsOk) {
+        // _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+
+        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message static part)
+        auto timeFrameByteNo{3U};
+        for (auto scramblingByte : _scramblingWord) {
+          timeFrame.at(timeFrameByteNo++) ^= scramblingByte;
+        }
+      }
 
       // communicate new data
-      if (_timeFrameCallback) {
+      if (frameStartByteOk and frameStaticBitsOk and _timeFrameCallback) {
         _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
       }
 
@@ -370,16 +391,6 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
     dataFrame.at(dataByteNo) = dataByte;
     byteStartIndex = nextByteStartIndex;
     startingBitValueIsOne = bitValueIsOne;
-  }
-
-  // validate time frame start byte
-  if (not(dataFrame.at(2) == TIME_FRAME_START_BYTE)) {
-    return {};
-  }
-
-  // validate time frame static bits
-  if (not(TIME_FRAME_STATIC_BITS == (dataFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK))) {
-    return {};
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);

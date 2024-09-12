@@ -41,7 +41,7 @@ int main() {
 
   decoder.registerTimeFrameReceptionCallback(handleFrameReception);
 
-  printf("\ne-CzasPL reference data decoder by SP5WWP & SP6HFE\n");
+  printf("\ne-CzasPL Radio C++ reference data decoder by SP6HFE\n");
 
   uint32_t sampleNo{0U};
 
