@@ -14,7 +14,6 @@ Top left bit is the MSb of the 1st byte whereas bottom right is the LSb of the 1
 Contentwise 1st transmited bit is numbered `0` and the last one `95`. Such stream is 96b long which make 12B of data.  
 Time frame structure is explained in the table below.
 
-
 | Bit range                 | Information/purpose                |
 |:-------------------------:|:-----------------------------------|
 | 0-15                      | Frame sync word 0x5555             |
@@ -26,7 +25,17 @@ Time frame structure is explained in the table below.
 
 ## Time message
 
-To be added
+Time message consist of 37 bytes which are part of the received time frame.  
+Time message structure is explained in the table below (provided its MSb is numbered here `0` which is a bit `27` in the time frame).
+
+| Bit range                 | Information/purpose                 |
+|:-------------------------:|:------------------------------------|
+| 0(S0)-29(S29)             | Threes of seconds since year 2000   |
+| 30(TZ0)-31(TZ1)           | Local time zone                     |
+| 32(LS)                    | Leap second announcement            |
+| 33(LSS)                   | Leap second sign                    |
+| 34(TZC)                   | Local time zone change announcement |
+| 35(SK0)-36(SK1)           | Transmission site operation state   |
 
 ## Data scrambling
 
@@ -42,12 +51,13 @@ By that time all mechanisms are already in place :)
 
 ## Reed-Solomon error correction
 
-No data provided offically
+To be added
 
 ## CRC-8
 
-No data provided offically
+To be added
 
 [1]: https://github.com/e-CzasPL/TimeReceiver225kHz
+[2]: https://www.unixtimestamp.com/
 
 [timeFrame]: ../../doc/img/eCzasPL_time_frame.jpg "e-CzasPL Radio time frame (source: e-CzasPL documentation)"
