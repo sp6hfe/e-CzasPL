@@ -1,4 +1,5 @@
 #include <DataDecoder/DataDecoder.hpp>
+#include <Tools/Helpers.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
@@ -62,6 +63,8 @@ bool DataDecoder::processNewSample(int16_t sample) {
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
 
     if (timeFrameGetter.has_value()) {
+      TimeData timeData{.utcTimestamp = 0U, .utcUnixTimestamp = 0U, .offset = LocalTimeOffset::OffsetPlus0h};
+
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
 
       // Check CRC-8 - to be discussed with GUM
@@ -76,18 +79,61 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
       // descramble the time message
       if (frameStartByteOk and frameStaticBitsOk) {
-        // _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        // printf("\n>Original frame:    ");
+        // printFrameContent(timeFrame);
 
         // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message static part)
         auto timeFrameByteNo{3U};
         for (auto scramblingByte : _scramblingWord) {
-          timeFrame.at(timeFrameByteNo++) ^= scramblingByte;
+          timeFrame.at(timeFrameByteNo) ^= scramblingByte;
+
+          switch (timeFrameByteNo) {
+            case 3U:  // bit 3-7
+              timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
+              break;
+            case 7U:  // MSb only
+              timeData.utcTimestamp <<= 1U;
+              timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+              break;
+            default:  // full byte
+              timeData.utcTimestamp <<= 8U;
+              timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+              break;
+          }
+
+          timeFrameByteNo++;
+        }
+
+        // printf("\n>Descrambled frame: ");
+        // printFrameContent(timeFrame);
+
+        // correct received time data as it means the number of 3[s] periods since beginning of the year 2000
+        static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+
+        timeData.utcTimestamp *= 3U;
+        timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+
+        // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simple decoding
+        const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) & 0x60) >> 5U)};
+        switch (timeOffset) {
+          case 0x01:
+            timeData.offset = LocalTimeOffset::OffsetPlus2h;
+            break;
+          case 0x02:
+            timeData.offset = LocalTimeOffset::OffsetPlus1h;
+            break;
+          case 0x03:
+            timeData.offset = LocalTimeOffset::OffsetPlus3h;
+            break;
+          default:
+            timeData.offset = LocalTimeOffset::OffsetPlus0h;
+            break;
         }
       }
 
       // communicate new data
-      if (frameStartByteOk and frameStaticBitsOk and _timeFrameCallback) {
-        _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+      if (frameStartByteOk and frameStaticBitsOk and _timeDataCallback) {
+        _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
       }
 
       // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
@@ -102,8 +148,8 @@ bool DataDecoder::processNewSample(int16_t sample) {
   return (_meaningfulDataStartIndex == 0U);
 }
 
-void DataDecoder::registerTimeFrameReceptionCallback(TimeFrameCallback callback) {
-  _timeFrameCallback = std::move(callback);
+void DataDecoder::registerTimeDataReceptionCallback(TimeDataCallback callback) {
+  _timeDataCallback = std::move(callback);
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
@@ -394,6 +440,13 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
+}
+
+void DataDecoder::printFrameContent(TimeFrame& frame) {
+  for (auto byte : frame) {
+    tools::Helpers::printBinaryValue(byte);
+    printf(" ");
+  }
 }
 
 }  // namespace eczas

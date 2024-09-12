@@ -13,33 +13,18 @@ union ByteTranslator {
   uint16_t uint16;
 };
 
-void printBinaryValue(uint8_t value) {
-  for (auto bit{0U}; bit < 8U; bit++) {
-    const auto bitValueOne{(value & 0x80) ? true : false};
-    if (bitValueOne) {
-      printf("1");
-    } else {
-      printf("0");
-    }
-    value <<= 1U;
-  }
-}
-
 int main() {
-  auto handleFrameReception{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
+  auto handleFrameReception{[](std::pair<const eczas::DataDecoder::TimeData&, uint32_t> frameDetails) {
     static auto frameNo{0U};
 
-    printf("\nFrame %d at %d: ", ++frameNo, frameDetails.second);
-    for (auto byte : frameDetails.first) {
-      printBinaryValue(byte);
-      printf(" ");
-    }
+    printf("\nTime frame %d at %d: utcTimestamp: %d, utcUnixTimestamp: %d, localTimeOffset: %d",
+      ++frameNo, frameDetails.second, frameDetails.first.utcTimestamp, frameDetails.first.utcUnixTimestamp, static_cast<uint8_t>(frameDetails.first.offset));
   }};
 
   ByteTranslator translator{};
   eczas::DataDecoder decoder{RAW_DATA_SAMPLES_PER_BIT};
 
-  decoder.registerTimeFrameReceptionCallback(handleFrameReception);
+  decoder.registerTimeDataReceptionCallback(handleFrameReception);
 
   printf("\ne-CzasPL Radio C++ reference data decoder by SP6HFE\n");
 
