@@ -51,19 +51,31 @@ public:
   /// @brief Time frame static bits mask
   static constexpr uint8_t TIME_FRAME_STATIC_BITS_MASK{0xE0};
 
-  /// @brief Local time offset to UTC in hours
-  enum class LocalTimeOffset : uint8_t {
+  /// @brief Time zone offset to UTC in hours
+  enum class TimeZoneOffset : uint8_t {
     OffsetPlus0h = 0U,  ///< No offset
     OffsetPlus1h,       ///< Offset +1h to UTC
     OffsetPlus2h,       ///< Offset +2h to UTC
     OffsetPlus3h,       ///< Offset +3h to UTC
   };
 
+  /// @brief State of the transmitter
+  enum class TransmitterState : uint8_t {
+    NormalOperation = 0U,        ///< Normal operation
+    PlannedMaintenance1Day,      ///< Planned maintenance for 1 day
+    PlannedMaintenance1Week,     ///< Planned maintenance for 1 week
+    PlannedMaintenanceOver1Week  ///< Planned maintenance for over 1 week
+  };
+
   /// @brief Received time data
   struct TimeData {
-    uint32_t utcTimestamp;      ///< UTC time in seconds since beginning of the year 2000
-    uint32_t utcUnixTimestamp;  ///< UTC time in seconds since beginning ot the year 1970
-    LocalTimeOffset offset;     ///< Local time (transmitting site) offset to UTC in hours
+    uint32_t utcTimestamp;              ///< UTC time in seconds since beginning of the year 2000
+    uint32_t utcUnixTimestamp;          ///< UTC time in seconds since beginning ot the year 1970
+    TimeZoneOffset offset;              ///< Time zone (transmitting site) offset to UTC in hours
+    bool timeZoneChangeAnnouncement;    ///< Flag indicating upcoming change of the time zone (transmitting site) offset
+    bool leapSecondAnnounced;           ///< Flag indicating announcement of the leap second addition
+    bool leapSecondPositive;            ///< Flag indicating sign of the leap second
+    TransmitterState transmitterState;  ///< Transmitter state
   };
 
   /// @brief Time data reception callback (time data, frame start sample no)

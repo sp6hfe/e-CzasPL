@@ -21,13 +21,46 @@ int main() {
     static auto frameNo{0U};
 
     auto localTimeOffsetInHours{static_cast<uint8_t>(frameDetails.first.offset)};
+    time_t utcTime{frameDetails.first.utcUnixTimestamp};
     time_t localUtcTime{frameDetails.first.utcUnixTimestamp + (localTimeOffsetInHours * secondsInHour)};
 
     printf("\nTime frame %d (at sample %d): ", ++frameNo, frameDetails.second);
     printf("\n> seconds since year 2000: %d", frameDetails.first.utcTimestamp);
     printf("\n> seconds since year 1970: %d", frameDetails.first.utcUnixTimestamp);
-    printf("\n> local time offset in hours: %d", localTimeOffsetInHours);
-    printf("\n> Decoded time (UTC+%d): %s", localTimeOffsetInHours, asctime(gmtime(&localUtcTime)));
+    printf("\n> local time zone offset in hours: +%d", localTimeOffsetInHours);
+    printf("\n> UTC time : %s", asctime(gmtime(&utcTime)));
+    printf("> local time (UTC+%d): %s", localTimeOffsetInHours, asctime(gmtime(&localUtcTime)));
+
+    if (frameDetails.first.timeZoneChangeAnnouncement) {
+      printf("> time zone offset change announced");
+    } else {
+      printf("> no time zone offset change announced");
+    }
+
+    if (frameDetails.first.leapSecondAnnounced) {
+      if (frameDetails.first.leapSecondPositive) {
+        printf("\n> positive leap second announced");
+      } else {
+        printf("\n> negative leap second announced");
+      }
+    } else {
+      printf("\n> no leap second announced");
+    }
+
+    switch (frameDetails.first.transmitterState) {
+      case eczas::DataDecoder::TransmitterState::PlannedMaintenance1Day:
+        printf("\n> planned transmitter maintenance for 1 day");
+        break;
+      case eczas::DataDecoder::TransmitterState::PlannedMaintenance1Week:
+        printf("\n> planned transmitter maintenance for 1 week");
+        break;
+      case eczas::DataDecoder::TransmitterState::PlannedMaintenanceOver1Week:
+        printf("\n> planned transmitter maintenance for over 1 week");
+        break;
+      default:
+        printf("\n> transmitter working OK");
+        break;
+    }
   }};
 
   ByteTranslator translator{};
