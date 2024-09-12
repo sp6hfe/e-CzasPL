@@ -45,12 +45,6 @@ public:
   /// @brief Time frame start byte
   static constexpr uint8_t TIME_FRAME_START_BYTE{0x60};
 
-  /// @brief Time frame static bits
-  static constexpr uint8_t TIME_FRAME_STATIC_BITS{0xA0};
-
-  /// @brief Time frame static bits mask
-  static constexpr uint8_t TIME_FRAME_STATIC_BITS_MASK{0xE0};
-
   /// @brief Time zone offset to UTC in hours
   enum class TimeZoneOffset : uint8_t {
     OffsetPlus0h = 0U,  ///< No offset

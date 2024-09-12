@@ -78,14 +78,17 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
       // Lookup and correct errors (Reed-Solomon) - to be discussed with GUM
 
-      // validate time frame start byte
-      const auto frameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+      // validate synchronization word
+      const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
 
-      // validate time frame static bits
-      const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
+      // validate time frame start byte
+      const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+
+      // validate time frame static bits (3 MSb of byte 3 is 0b101)
+      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
 
       // descramble the time message and extract the timestamp
-      if (frameStartByteOk and frameStaticBitsOk) {
+      if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
         // printf("\n>Original frame:    ");
         // printFrameContent(timeFrame);
 
