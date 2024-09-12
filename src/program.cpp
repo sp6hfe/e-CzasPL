@@ -3,6 +3,7 @@
 #include <iostream>
 #include <optional>
 #include <stdio.h>
+#include <time.h>
 
 using namespace std;
 
@@ -15,10 +16,18 @@ union ByteTranslator {
 
 int main() {
   auto handleFrameReception{[](std::pair<const eczas::DataDecoder::TimeData&, uint32_t> frameDetails) {
+    static constexpr uint32_t secondsInHour{3600U};
+
     static auto frameNo{0U};
 
-    printf("\nTime frame %d at %d: utcTimestamp: %d, utcUnixTimestamp: %d, localTimeOffset: %d",
-      ++frameNo, frameDetails.second, frameDetails.first.utcTimestamp, frameDetails.first.utcUnixTimestamp, static_cast<uint8_t>(frameDetails.first.offset));
+    auto localTimeOffsetInHours{static_cast<uint8_t>(frameDetails.first.offset)};
+    time_t localUtcTime{frameDetails.first.utcUnixTimestamp + (localTimeOffsetInHours * secondsInHour)};
+
+    printf("\nTime frame %d (at sample %d): ", ++frameNo, frameDetails.second);
+    printf("\n> seconds since year 2000: %d", frameDetails.first.utcTimestamp);
+    printf("\n> seconds since year 1970: %d", frameDetails.first.utcUnixTimestamp);
+    printf("\n> local time offset in hours: %d", localTimeOffsetInHours);
+    printf("\n> Decoded time (UTC+%d): %s", localTimeOffsetInHours, asctime(gmtime(&localUtcTime)));
   }};
 
   ByteTranslator translator{};
