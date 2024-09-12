@@ -63,15 +63,6 @@ bool DataDecoder::processNewSample(int16_t sample) {
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
 
     if (timeFrameGetter.has_value()) {
-      TimeData timeData{
-        .utcTimestamp = 0U,
-        .utcUnixTimestamp = 0U,
-        .offset = TimeZoneOffset::OffsetPlus0h,
-        .timeZoneChangeAnnouncement = false,
-        .leapSecondAnnounced = false,
-        .leapSecondPositive = false,
-        .transmitterState = TransmitterState::NormalOperation};
-
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
 
       // Check CRC-8 - to be discussed with GUM
@@ -89,6 +80,15 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
       // descramble the time message and extract the timestamp
       if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
+        TimeData timeData{
+          .utcTimestamp = 0U,
+          .utcUnixTimestamp = 0U,
+          .offset = TimeZoneOffset::OffsetPlus0h,
+          .timeZoneChangeAnnouncement = false,
+          .leapSecondAnnounced = false,
+          .leapSecondPositive = false,
+          .transmitterState = TransmitterState::NormalOperation};
+
         // printf("\n>Original frame:    ");
         // printFrameContent(timeFrame);
 
