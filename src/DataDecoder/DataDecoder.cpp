@@ -77,16 +77,17 @@ bool DataDecoder::processNewSample(int16_t sample) {
       // validate time frame static bits
       const auto frameStaticBitsOk{TIME_FRAME_STATIC_BITS == (timeFrame.at(3) & TIME_FRAME_STATIC_BITS_MASK)};
 
-      // descramble the time message
+      // descramble the time message and extract the timestamp
       if (frameStartByteOk and frameStaticBitsOk) {
         // printf("\n>Original frame:    ");
         // printFrameContent(timeFrame);
 
-        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message static part)
+        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
         auto timeFrameByteNo{3U};
         for (auto scramblingByte : _scramblingWord) {
           timeFrame.at(timeFrameByteNo) ^= scramblingByte;
 
+          // at the same time grab timestamp data
           switch (timeFrameByteNo) {
             case 3U:  // bit 3-7
               timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
@@ -107,14 +108,14 @@ bool DataDecoder::processNewSample(int16_t sample) {
         // printf("\n>Descrambled frame: ");
         // printFrameContent(timeFrame);
 
-        // correct received time data as it means the number of 3[s] periods since beginning of the year 2000
+        // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
         static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
 
         timeData.utcTimestamp *= 3U;
         timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
 
-        // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simple decoding
-        const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) & 0x60) >> 5U)};
+        // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
+        const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
         switch (timeOffset) {
           case 0x01:
             timeData.offset = LocalTimeOffset::OffsetPlus2h;
@@ -131,7 +132,7 @@ bool DataDecoder::processNewSample(int16_t sample) {
         }
       }
 
-      // communicate new data
+      // communicate received time data
       if (frameStartByteOk and frameStaticBitsOk and _timeDataCallback) {
         _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
       }
