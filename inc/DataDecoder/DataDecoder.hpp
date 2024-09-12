@@ -51,11 +51,23 @@ public:
   /// @brief Time frame static bits mask
   static constexpr uint8_t TIME_FRAME_STATIC_BITS_MASK{0xE0};
 
-  /// @brief Time frame data container
-  using TimeFrame = std::array<uint8_t, TIME_FRAME_BYTES_NO>;
+  /// @brief Local time offset to UTC in hours
+  enum class LocalTimeOffset : uint8_t {
+    OffsetPlus0h = 0U,  ///< No offset
+    OffsetPlus1h,       ///< Offset +1h to UTC
+    OffsetPlus2h,       ///< Offset +2h to UTC
+    OffsetPlus3h,       ///< Offset +3h to UTC
+  };
 
-  /// @brief Time frame reception callback (frame, frame start sample no)
-  using TimeFrameCallback = std::function<void(std::pair<const TimeFrame&, uint32_t>)>;
+  /// @brief Received time data
+  struct TimeData {
+    uint32_t utcTimestamp;      ///< UTC time in seconds since beginning of the year 2000
+    uint32_t utcUnixTimestamp;  ///< UTC time in seconds since beginning ot the year 1970
+    LocalTimeOffset offset;     ///< Local time (transmitting site) offset to UTC in hours
+  };
+
+  /// @brief Time data reception callback (time data, frame start sample no)
+  using TimeDataCallback = std::function<void(std::pair<const TimeData&, uint32_t>)>;
 
   /**
    * @brief Constructor
@@ -68,11 +80,11 @@ public:
   ~DataDecoder() = default;
 
   /**
-   * @brief Register time frame reception callback
+   * @brief Register time data reception callback
    *
    * @param callback The callback
    */
-  void registerTimeFrameReceptionCallback(TimeFrameCallback callback);
+  void registerTimeDataReceptionCallback(TimeDataCallback callback);
 
   /**
    * @brief Process new sample
@@ -86,6 +98,9 @@ public:
   bool processNewSample(int16_t sample);
 
 private:
+  /// @brief Time frame data container
+  using TimeFrame = std::array<uint8_t, TIME_FRAME_BYTES_NO>;
+
   std::array<int16_t, STREAM_SIZE> _stream{};
 
   std::array<int32_t, STREAM_SIZE> _correlator{};
@@ -94,7 +109,7 @@ private:
 
   const std::array<uint8_t, 5> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
 
-  TimeFrameCallback _timeFrameCallback{nullptr};
+  TimeDataCallback _timeDataCallback{nullptr};
 
   uint8_t _streamSamplesPerBit;
 
@@ -113,6 +128,8 @@ private:
   bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
+
+  void printFrameContent(TimeFrame& frame);
 };
 
 }  // namespace eczas
