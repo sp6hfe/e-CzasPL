@@ -78,25 +78,10 @@ bool DataDecoder::processNewSample(int16_t sample) {
       if (frameStartByteOk and frameStaticBitsOk) {
         // _timeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
 
-        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0)
-        static constexpr uint8_t offsetToScramblingWordMsb{3U};  // 3 most significant bits of the 1st byte of the scrambling word array are useless (they are just a fill for the byte-type storage)
+        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message static part)
         auto timeFrameByteNo{3U};
-        auto timeFrameByteBitNo{4U};
-        auto timeFrameDataByte{timeFrame.at(timeFrameByteNo)};
-        for (auto scramblingCounter{offsetToScramblingWordMsb}; scramblingCounter < (37U + offsetToScramblingWordMsb); scramblingCounter++) {
-          const auto scramblingByteNo{static_cast<uint8_t>(scramblingCounter / 8U)};
-          const auto scramblingByteBitNo{static_cast<uint8_t>(7U - (scramblingCounter % 8U))};
-          const auto scramblingBit{static_cast<uint8_t>((_scramblingWord.at(scramblingByteNo) >> scramblingByteBitNo) & 0x01)};
-          timeFrameDataByte ^= (scramblingBit << timeFrameByteBitNo);
-
-          if (timeFrameByteBitNo == 0U) {
-            timeFrame.at(timeFrameByteNo) = timeFrameDataByte;
-            timeFrameByteNo++;
-            timeFrameDataByte = timeFrame.at(timeFrameByteNo);
-            timeFrameByteBitNo = 7U;
-          } else {
-            timeFrameByteBitNo--;
-          }
+        for (auto scramblingByte : _scramblingWord) {
+          timeFrame.at(timeFrameByteNo++) ^= scramblingByte;
         }
       }
 
