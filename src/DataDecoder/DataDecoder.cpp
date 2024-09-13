@@ -1,5 +1,4 @@
 #include <DataDecoder/DataDecoder.hpp>
-#include <Tools/Helpers.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
@@ -65,10 +64,6 @@ bool DataDecoder::processNewSample(int16_t sample) {
     if (timeFrameGetter.has_value()) {
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
 
-      // Check CRC-8 - to be discussed with GUM
-
-      // Lookup and correct errors (Reed-Solomon) - to be discussed with GUM
-
       // validate synchronization word
       const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
 
@@ -89,8 +84,14 @@ bool DataDecoder::processNewSample(int16_t sample) {
           .leapSecondPositive = false,
           .transmitterState = TransmitterState::NormalOperation};
 
-        // printf("\n>Original frame:    ");
-        // printFrameContent(timeFrame);
+        // send raw time frame - if callback registered
+        if (_timeFrameRawCallback) {
+          _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        }
+
+        // check CRC-8 - to be discussed with GUM
+
+        // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
 
         // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
         auto timeFrameByteNo{3U};
@@ -114,9 +115,6 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
           timeFrameByteNo++;
         }
-
-        // printf("\n>Descrambled frame: ");
-        // printFrameContent(timeFrame);
 
         // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
         static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
@@ -165,7 +163,12 @@ bool DataDecoder::processNewSample(int16_t sample) {
             break;
         }
 
-        // communicate received time data
+        // send processed time frame - if callback registered
+        if (_timeFrameProcessedCallback) {
+          _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        }
+
+        // send time data - if callback received
         if (_timeDataCallback) {
           _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
         }
@@ -183,8 +186,16 @@ bool DataDecoder::processNewSample(int16_t sample) {
   return (_meaningfulDataStartIndex == 0U);
 }
 
-void DataDecoder::registerTimeDataReceptionCallback(TimeDataCallback callback) {
+void DataDecoder::registerTimeDataCallback(TimeDataCallback callback) {
   _timeDataCallback = std::move(callback);
+}
+
+void DataDecoder::registerTimeFrameRawCallback(TimeFrameCallback callback) {
+  _timeFrameRawCallback = std::move(callback);
+}
+
+void DataDecoder::registerTimeFrameProcessedCallback(TimeFrameCallback callback) {
+  _timeFrameProcessedCallback = std::move(callback);
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
@@ -475,13 +486,6 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
-}
-
-void DataDecoder::printFrameContent(TimeFrame& frame) {
-  for (auto byte : frame) {
-    tools::Helpers::printBinaryValue(byte);
-    printf(" ");
-  }
 }
 
 }  // namespace eczas
