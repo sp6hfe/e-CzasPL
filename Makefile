@@ -11,6 +11,7 @@ TARGET   = program
 INCLUDE  = -Iinc/
 SRC      =                      \
    $(wildcard src/DataDecoder/*.cpp) \
+   $(wildcard src/Tools/*.cpp) \
    $(wildcard src/*.cpp)         \
 
 OBJECTS  = $(SRC:%.cpp=$(OBJ_DIR)/%.o)

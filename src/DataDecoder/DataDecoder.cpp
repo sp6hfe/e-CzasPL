@@ -1,4 +1,5 @@
 #include <DataDecoder/DataDecoder.hpp>
+#include <Tools/Crc8.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
@@ -76,7 +77,7 @@ bool DataDecoder::processNewSample(int16_t sample) {
       // validate time frame static bits (3 MSb of byte 3 is 0b101)
       const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
 
-      // descramble the time message and extract the timestamp
+      // process time message data
       if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
         TimeData timeData{
           .utcTimestamp = 0U,
@@ -92,88 +93,104 @@ bool DataDecoder::processNewSample(int16_t sample) {
           _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
 
-        // check CRC-8 - to be discussed with GUM
+        // check CRC8 to see if any error correction is needed
+        uint8_t crc8 = 0U;
+        {
+          tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+          crc.init();
+          for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
+            crc.update(timeFrame.at(byteNo));
+          }
+          crc8 = crc.getCrc8();
+        }
+        const auto timeMessageDataValid{crc8 == timeFrame.at(11)};
 
         // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
+        if (not timeMessageDataValid) {
+          printf("\nX CRC8 issue - can't fix errors yet using Reed-Solomon data");
+        }
 
-        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
-        auto timeFrameByteNo{3U};
-        for (auto scramblingByte : _scramblingWord) {
-          timeFrame.at(timeFrameByteNo) ^= scramblingByte;
+        // proceed if data validation/correction was successful
+        if (timeMessageDataValid) {
+          // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
+          auto timeFrameByteNo{3U};
+          for (auto scramblingByte : _scramblingWord) {
+            timeFrame.at(timeFrameByteNo) ^= scramblingByte;
 
-          // at the same time grab timestamp data
-          switch (timeFrameByteNo) {
-            case 3U:  // bit 3-7
-              timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
+            // at the same time grab timestamp data
+            switch (timeFrameByteNo) {
+              case 3U:  // bit 3-7
+                timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
+                break;
+              case 7U:  // MSb only
+                timeData.utcTimestamp <<= 1U;
+                timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+                break;
+              default:  // full byte
+                timeData.utcTimestamp <<= 8U;
+                timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+                break;
+            }
+
+            timeFrameByteNo++;
+          }
+
+          // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
+          static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+
+          timeData.utcTimestamp *= 3U;
+          timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+
+          // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
+          const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
+          switch (timeOffset) {
+            case 0x01:
+              timeData.offset = TimeZoneOffset::OffsetPlus2h;
               break;
-            case 7U:  // MSb only
-              timeData.utcTimestamp <<= 1U;
-              timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+            case 0x02:
+              timeData.offset = TimeZoneOffset::OffsetPlus1h;
               break;
-            default:  // full byte
-              timeData.utcTimestamp <<= 8U;
-              timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+            case 0x03:
+              timeData.offset = TimeZoneOffset::OffsetPlus3h;
+              break;
+            default:
+              timeData.offset = TimeZoneOffset::OffsetPlus0h;
               break;
           }
 
-          timeFrameByteNo++;
-        }
+          // get time zone change announcement (bit TZC(2))
+          timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
 
-        // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
-        static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+          // extract leap second related information (bits LS(4) and LSS(3))
+          timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
+          timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
 
-        timeData.utcTimestamp *= 3U;
-        timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+          // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
+          const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
+          switch (transmitterState) {
+            case 0x01:
+              timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
+              break;
+            case 0x02:
+              timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
+              break;
+            case 0x03:
+              timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
+              break;
+            default:
+              timeData.transmitterState = TransmitterState::NormalOperation;
+              break;
+          }
 
-        // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
-        const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
-        switch (timeOffset) {
-          case 0x01:
-            timeData.offset = TimeZoneOffset::OffsetPlus2h;
-            break;
-          case 0x02:
-            timeData.offset = TimeZoneOffset::OffsetPlus1h;
-            break;
-          case 0x03:
-            timeData.offset = TimeZoneOffset::OffsetPlus3h;
-            break;
-          default:
-            timeData.offset = TimeZoneOffset::OffsetPlus0h;
-            break;
-        }
+          // send processed time frame - if callback registered
+          if (_timeFrameProcessedCallback) {
+            _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+          }
 
-        // get time zone change announcement (bit TZC(2))
-        timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
-
-        // extract leap second related information (bits LS(4) and LSS(3))
-        timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
-        timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
-
-        // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
-        const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
-        switch (transmitterState) {
-          case 0x01:
-            timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
-            break;
-          case 0x02:
-            timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
-            break;
-          case 0x03:
-            timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
-            break;
-          default:
-            timeData.transmitterState = TransmitterState::NormalOperation;
-            break;
-        }
-
-        // send processed time frame - if callback registered
-        if (_timeFrameProcessedCallback) {
-          _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-        }
-
-        // send time data - if callback received
-        if (_timeDataCallback) {
-          _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
+          // send time data - if callback received
+          if (_timeDataCallback) {
+            _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
+          }
         }
       }
 
