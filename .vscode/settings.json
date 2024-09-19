@@ -1,0 +1,9 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "${workspaceFolder}/build/apps",
+            "binaryPath": "${workspaceFolder}/build/apps/eCzasPL",
+            "binaryArgs": []
+        }
+    ]
+}

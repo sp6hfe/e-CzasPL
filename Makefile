@@ -1,8 +1,4 @@
-# https://www.softwaretestinghelp.com/cpp-makefile-tutorial/
-# https://gist.github.com/mauriciopoppe/de8908f67923091982c8c8136a063ea6
-# https://www.partow.net/programming/makefile/index.html
-
-APP_NAME = eCzasDecoder
+APP_NAME = eCzasPL
 
 CXX      = g++
 CXXFLAGS = -std=gnu++17 -Wall -Wextra -Werror
@@ -21,9 +17,6 @@ OBJECTS  = $(SRC:%.cpp=$(OBJ_DIR)/%.o)
 DEPENDENCIES \
          = $(OBJECTS:.o=.d)
 
-# target all
-all: build $(APP_DIR)/$(TARGET)
-
 # targets for all objects
 $(OBJ_DIR)/%.o: %.cpp
 	@mkdir -p $(@D)
@@ -36,7 +29,12 @@ $(APP_DIR)/$(TARGET): $(OBJECTS)
 
 -include $(DEPENDENCIES)
 
-.PHONY: all build clean debug release info
+# build targets
+.DEFAULT_GOAL := release
+
+clean:
+	-@rm -rvf $(OBJ_DIR)/*
+	-@rm -rvf $(APP_DIR)/*
 
 build:
 	@mkdir -p $(APP_DIR)
@@ -48,9 +46,7 @@ debug: all
 release: CXXFLAGS += -O2
 release: all
 
-clean:
-	-@rm -rvf $(OBJ_DIR)/*
-	-@rm -rvf $(APP_DIR)/*
+all: clean build $(APP_DIR)/$(TARGET)
 
 info:
 	@echo "[*] Application dir: ${APP_DIR}     "
@@ -59,3 +55,5 @@ info:
 	@echo "[*] Objects:         ${OBJECTS}     "
 	@echo "[*] Dependencies:    ${DEPENDENCIES}"
 
+# targets not associated with files (timestamp check) execuded always
+.PHONY: clean build debug release all info
