@@ -8,12 +8,13 @@ Project's github is [here][3].
 
 ## Time frame
 
-Structure of the time frame consist of 12 bytes and is is depicted below.
+Time frame consist of 12 bytes numbered from `0` to `11` and 0th byte being the MSB.  
+Frame structure is depicted below.
 
 ![alt][timeFrame]
 
 Data stream is transferred bit-by-bit left to right, top to bottom.  
-Top left bit is the MSb of the 1st byte whereas bottom right is the LSb of the 12th byte.
+Top left bit is the MSb of the 1st byte (no `0`) whereas bottom right is the LSb of the 12th byte (no `11`).
 
 Contentwise 1st transmited bit is numbered `0` and the last one `95`. Such stream is 96b long which make 12B of data.  
 Time frame structure is explained in the table below.
@@ -106,11 +107,20 @@ Scrambling is a form of data encryption, but whenever you publicly show the key 
 Probably there will be a service, in future, where some of the time frames will be encrypted using a key shared only with trusted partners who may be signing an NDA or other agreements. This may be to increase level of trust in the synchronization achieved over the radio link.
 By that time all mechanisms are already in place :)
 
-## Reed-Solomon error correction
-
-To be added
-
 ## CRC-8
+
+CRC8 checksum is calculated over time frame bytes `3` to `7` including (remember we number them from `0` to `11`).  
+CRC8 allows for estimation if time message data was received without issues.  
+Calculated checksum is verified against value received in frame's 11th byte.  
+In case of inconsistency an error correction is needed (it will be explained in the next secion).
+
+CRC8 calculation is widely described (i.e. [here][5]) and important information to know is:
+* polynomial: `0x07`
+* initialization value: `0x00`
+* checksum is calculated `over scrambled data` (meaning data validation is pretty straigh-forward)
+
+
+## Reed-Solomon error correction
 
 To be added
 
@@ -118,5 +128,6 @@ To be added
 [2]: https://en.wikipedia.org/wiki/Phase-shift_keying
 [3]: https://github.com/e-CzasPL/TimeReceiver225kHz
 [4]: https://www.unixtimestamp.com/
+[5]: http://www.sunshine2k.de/articles/coding/crc/understanding_crc.html
 
 [timeFrame]: ../../doc/img/eCzasPL_time_frame.jpg "e-CzasPL Radio time frame (source: e-CzasPL documentation)"

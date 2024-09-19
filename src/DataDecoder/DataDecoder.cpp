@@ -1,4 +1,5 @@
 #include <DataDecoder/DataDecoder.hpp>
+#include <Tools/Crc8.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
@@ -14,7 +15,7 @@ namespace eczas {
 
 DataDecoder::DataDecoder(uint8_t streamSamplesPerBit) : _streamSamplesPerBit(streamSamplesPerBit) {
   _stream.fill(0);
-  _correlator.fill(CORRELATION_INVALID);
+  _correlator.fill(false);
   _sampleNo.fill(0U);
 }
 
@@ -46,7 +47,7 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
   // add new data
   _stream[LAST_STREAM_INDEX] = sample;
-  _correlator[LAST_STREAM_INDEX] = 0;
+  _correlator[LAST_STREAM_INDEX] = false;
   _sampleNo[LAST_STREAM_INDEX] = sampleNo;
 
   // update fresh data index
@@ -76,7 +77,7 @@ bool DataDecoder::processNewSample(int16_t sample) {
       // validate time frame static bits (3 MSb of byte 3 is 0b101)
       const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
 
-      // descramble the time message and extract the timestamp
+      // process time message data
       if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
         TimeData timeData{
           .utcTimestamp = 0U,
@@ -92,93 +93,114 @@ bool DataDecoder::processNewSample(int16_t sample) {
           _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
 
-        // check CRC-8 - to be discussed with GUM
+        // check CRC8 to see if any error correction is needed
+        uint8_t crc8 = 0U;
+        {
+          tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+          crc.init();
+          for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
+            crc.update(timeFrame.at(byteNo));
+          }
+          crc8 = crc.getCrc8();
+        }
+        const auto timeMessageDataValid{crc8 == timeFrame.at(11)};
 
         // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
+        if (not timeMessageDataValid) {
+#ifdef DEBUG
+          printf("\nX CRC8 issue - can't fix errors yet using Reed-Solomon data");
+#endif
+        }
 
-        // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
-        auto timeFrameByteNo{3U};
-        for (auto scramblingByte : _scramblingWord) {
-          timeFrame.at(timeFrameByteNo) ^= scramblingByte;
+        // proceed if data validation/correction was successful
+        if (timeMessageDataValid) {
+          // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
+          auto timeFrameByteNo{3U};
+          for (auto scramblingByte : _scramblingWord) {
+            timeFrame.at(timeFrameByteNo) ^= scramblingByte;
 
-          // at the same time grab timestamp data
-          switch (timeFrameByteNo) {
-            case 3U:  // bit 3-7
-              timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
+            // at the same time grab timestamp data
+            switch (timeFrameByteNo) {
+              case 3U:  // bit 3-7
+                timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
+                break;
+              case 7U:  // MSb only
+                timeData.utcTimestamp <<= 1U;
+                timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+                break;
+              default:  // full byte
+                timeData.utcTimestamp <<= 8U;
+                timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+                break;
+            }
+
+            timeFrameByteNo++;
+          }
+
+          // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
+          static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+
+          timeData.utcTimestamp *= 3U;
+          timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+
+          // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
+          const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
+          switch (timeOffset) {
+            case 0x01:
+              timeData.offset = TimeZoneOffset::OffsetPlus2h;
               break;
-            case 7U:  // MSb only
-              timeData.utcTimestamp <<= 1U;
-              timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+            case 0x02:
+              timeData.offset = TimeZoneOffset::OffsetPlus1h;
               break;
-            default:  // full byte
-              timeData.utcTimestamp <<= 8U;
-              timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+            case 0x03:
+              timeData.offset = TimeZoneOffset::OffsetPlus3h;
+              break;
+            default:
+              timeData.offset = TimeZoneOffset::OffsetPlus0h;
               break;
           }
 
-          timeFrameByteNo++;
+          // get time zone change announcement (bit TZC(2))
+          timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
+
+          // extract leap second related information (bits LS(4) and LSS(3))
+          timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
+          timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
+
+          // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
+          const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
+          switch (transmitterState) {
+            case 0x01:
+              timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
+              break;
+            case 0x02:
+              timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
+              break;
+            case 0x03:
+              timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
+              break;
+            default:
+              timeData.transmitterState = TransmitterState::NormalOperation;
+              break;
+          }
+
+          // send processed time frame - if callback registered
+          if (_timeFrameProcessedCallback) {
+            _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+          }
+
+          // send time data - if callback received
+          if (_timeDataCallback) {
+            _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
+          }
         }
 
-        // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
-        static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
-
-        timeData.utcTimestamp *= 3U;
-        timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
-
-        // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
-        const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
-        switch (timeOffset) {
-          case 0x01:
-            timeData.offset = TimeZoneOffset::OffsetPlus2h;
-            break;
-          case 0x02:
-            timeData.offset = TimeZoneOffset::OffsetPlus1h;
-            break;
-          case 0x03:
-            timeData.offset = TimeZoneOffset::OffsetPlus3h;
-            break;
-          default:
-            timeData.offset = TimeZoneOffset::OffsetPlus0h;
-            break;
-        }
-
-        // get time zone change announcement (bit TZC(2))
-        timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
-
-        // extract leap second related information (bits LS(4) and LSS(3))
-        timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
-        timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
-
-        // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
-        const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
-        switch (transmitterState) {
-          case 0x01:
-            timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
-            break;
-          case 0x02:
-            timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
-            break;
-          case 0x03:
-            timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
-            break;
-          default:
-            timeData.transmitterState = TransmitterState::NormalOperation;
-            break;
-        }
-
-        // send processed time frame - if callback registered
-        if (_timeFrameProcessedCallback) {
-          _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-        }
-
-        // send time data - if callback received
-        if (_timeDataCallback) {
-          _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
-        }
+        // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
+        _meaningfulDataStartIndex = lastIndexOfTheTimeFrame;
+      } else {
+        // currently extracted frame doesn't look like the one we are looking for - increase _meaningfulDataStartIndex by one
+        _meaningfulDataStartIndex++;
       }
-
-      // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
-      _meaningfulDataStartIndex = lastIndexOfTheTimeFrame;
     }
   }
 
@@ -205,65 +227,46 @@ void DataDecoder::calculateSyncWordCorrelation() {
   /* Calculate correlation against 16 bit sync word 0x5555
      - LSb of the sync word is the last sample in the stream buffer
      - sync word bit samples used in calculation are spaced in buffer with _streamSamplesPerBit
-     - MSb of the sync word is located (15 * _streamSamplesPerBit) bits back with respect to LSB sample
-     - correlation is placed at sync word MSb index to ease further localization of the frame start
+     - MSb of the sync word is located (15 * _streamSamplesPerBit) bits back with respect to LSb sample
+     - correlation is placed at sync word's MSb index to ease further localization of the frame start
 
      Data frames are separated with some fill-up time so they can start at full second.
      Before beginning of the sync word stream values are around value 0 (no carrier phase change).
      MSb of sync word is not detectable from the stream values due to no phase change observed (but 0-value is usable later on).
-     Drop in stream's sample value below 0 and hysteresis region is an indication of the start of bit value 0 transmission.
-     Jump in stream's sample value above 0 and hysteresis gerion is an indication of the start of bit value 1 transmission.
-     In order to precisely detect where sync word 0x5555 lay in the stream a correlation estimate is calculated for each new signal sample.
-     Correlation estimator is a sum of stream sample values (making up potential sync word) according to expected pattern.
-     Within expected region of bit 0 values are taken as they are whereas for regions where expected bit is 1 a sign of the sample is inverted
-     (making it positive to increase correlation estimate value).
-     To further increase sync word detection capabilities a hysteresis region is defined which is used to evaluate if the sample value
-     lay within noise region or outside of it. Each sample in calculation, when outside of the noise region, is summed twice.
-     MSb sample is also evaluated if falls below lower hysteresis region (meaning sync word starts from 0) and if not correlation is set as not valid. */
+     Drop in stream's sample value below 0 (and lower hysteresis region) is an indication of the start of bit value 0 transmission.
+     Jump in stream's sample value above 0 (and higher hysteresis region) is an indication of the start of bit value 1 transmission.
+     In order to detect where sync word 0x5555 lay in the stream a correlation estimate is calculated on each new signal sample recption. */
 
-  static constexpr int16_t SYNC_WORD_BIT_0_CORRELATION_MULTIPLIER{-1};  // samples for bit value 0 should go negative so we need to invert their sign to increase correlation result
-  static constexpr int16_t SYNC_WORD_BIT_1_CORRELATION_MULTIPLIER{1};   // samples for bit value 1 should go positive so we take their values directly into correlation result
-
-  {
-    // MSb sample should be the 1st one to fall below lower hysteresis as bit value 0 starts sync word transmission
-    const auto streamIndexToSyncWordMsb{LAST_STREAM_INDEX - static_cast<uint16_t>(static_cast<uint16_t>(SYNC_WORD_BITS_NO - 1U) * _streamSamplesPerBit)};
-    const auto msbIsBit0{isSampleValueOutOfNoiseRegion(streamIndexToSyncWordMsb) and (_stream[streamIndexToSyncWordMsb] < 0)};
-
-    if (not msbIsBit0) {
-      _correlator[streamIndexToSyncWordMsb] = CORRELATION_INVALID;
-      return;
-    }
-  }
-
-  int32_t correlation{0};
+  bool correlationDetected{true};
 
   // traverse stream to correlate according to 16 points spaced equally (every _streamSamplesPerBit)
   auto streamIndexToSyncWordBit{LAST_STREAM_INDEX};
 
-  /* due to sync word value (alternating bit values) carrier phase changes are cyclic - this should give alternating sample values signs;
-     sync word LSb is located at stream end, more significant bits are accessed by jumping back by _streamSamplesPerBit */
+  /* due to sync word value (alternating bit values) carrier phase changes are expected to be cyclic;
+     sync word's LSb is located at stream end, more significant bits are accessed by jumping back by _streamSamplesPerBit */
   for (uint8_t syncWordBitNo{0U}; syncWordBitNo < SYNC_WORD_BITS_NO; syncWordBitNo++) {
-    const auto syncWordBitValueIs1{((SYNC_WORD >> syncWordBitNo) & static_cast<uint16_t>(0x1)) != 0U};
-    const auto syncWordBitCorrelationMultiplier{syncWordBitValueIs1 ? SYNC_WORD_BIT_1_CORRELATION_MULTIPLIER : SYNC_WORD_BIT_0_CORRELATION_MULTIPLIER};
-    const auto syncWordBitFromStream{_stream[streamIndexToSyncWordBit]};
-    const auto syncWordBitCorrelation{static_cast<int32_t>(static_cast<int32_t>(syncWordBitFromStream) * syncWordBitCorrelationMultiplier)};
-    correlation += syncWordBitCorrelation;
+    // for the sync word area stream samples should have meaningful magnitude
+    if (not isSampleValueOutOfNoiseRegion(streamIndexToSyncWordBit)) {
+      correlationDetected = false;
+      break;
+    }
 
-    // when sample is out of hysteresis it means it doesn't belong to the noise region and correlation is updated again (to strenghten estimator value change)
-    if (isSampleValueOutOfNoiseRegion(streamIndexToSyncWordBit)) {
-      correlation += syncWordBitCorrelation;
+    const auto syncWordBitValue{((SYNC_WORD >> syncWordBitNo) & static_cast<uint16_t>(0x0001)) != 0U};
+    const auto streamBitValue{_stream[streamIndexToSyncWordBit] > 0};
+
+    // they should exactly follow sync word's bit pattern
+    if (syncWordBitValue != streamBitValue) {
+      correlationDetected = false;
+      break;
     }
 
     // to reach next sample a jump back is needed
     streamIndexToSyncWordBit -= _streamSamplesPerBit;
   }
 
-  // update an index to the MSb
-  streamIndexToSyncWordBit += _streamSamplesPerBit;
-
-  /* store calculated correlation into the buffer at index where sync word beginning (MSB) is located;
-     last index shift moved it to the place where MSb is located (tested against being within noise region already)*/
-  _correlator[streamIndexToSyncWordBit] = correlation;
+  // store correlation value into the buffer at sync word's start index
+  const auto syncWordStartIndex{static_cast<uint16_t>(LAST_STREAM_INDEX - static_cast<uint16_t>(static_cast<uint16_t>(SYNC_WORD_BITS_NO - 1U) * _streamSamplesPerBit))};
+  _correlator[syncWordStartIndex] = correlationDetected;
 
   return;
 }
@@ -292,88 +295,36 @@ std::optional<uint16_t> DataDecoder::detectSyncWordStartIndexByCorrelation() {
   const auto samplesNoOfCorrelationMaxRepetition{static_cast<uint16_t>(_streamSamplesPerBit * 2U)};  // sync word correlation peaks few times around best match; peaks repetition relates to _streamSamplesPerBit
 
   bool syncWordDetected{false};
-
-  uint16_t firstValidCorrelationIndex{0U};
-  uint16_t samplesNoAllowedUntilNextValidCorrelation{0U};
-
-  bool globalCorrelationMaxSearchOngoing{false};
-  bool localCorrelationMaxSearchOngoing{false};
-  uint16_t correlationMaxIndex{0U};
-  int32_t correlationMaxValue{0};
+  uint16_t syncWordStartIndex{0U};
 
   const auto startIndexOfNotCalculatedCorrelatorData{static_cast<uint16_t>(STREAM_SIZE - samplesNoWithoutCorrelationData)};
   const auto minSamplesNoForSyncWordDetection{static_cast<uint16_t>(samplesNoForSyncWord + samplesNoOfCorrelationMaxRepetition)};
 
-  // validate if it is worth doing any data analysis; at least sync word + some extra should fit in the buffer (having corelation value calculated)
+  // validate if it is worth doing any data analysis; at least sync word + some extra (having corelation value calculated) should fit in the buffer
   if (_meaningfulDataStartIndex > (startIndexOfNotCalculatedCorrelatorData - minSamplesNoForSyncWordDetection)) {
     return {};
   }
 
-  // using correlations array data find 1st best match for the sync word presence or latest found (valid) correlation max
+  // using correlation array find 1st best match for the sync word presence
   for (auto correlatorIndex{_meaningfulDataStartIndex}; correlatorIndex < startIndexOfNotCalculatedCorrelatorData; correlatorIndex++) {
-    const auto correlatorValue{_correlator[correlatorIndex]};
+    const auto correlationDetected{_correlator[correlatorIndex]};
 
-    if (correlatorValue >= CORRELATION_VALID) {
-      localCorrelationMaxSearchOngoing = true;
-      // update on greater value
-      if (correlatorValue > correlationMaxValue) {
-        correlationMaxIndex = correlatorIndex;
-        correlationMaxValue = correlatorValue;
-      }
-
-      // handle 1st valid correlation value (global search flag goes true once per detection round)
-      if (not globalCorrelationMaxSearchOngoing) {
-        globalCorrelationMaxSearchOngoing = true;
-        firstValidCorrelationIndex = correlatorIndex;
-
-        // validate if sync word start was detected already (and we basically wait for frame remaining data)
-        if (correlatorValue == SYNC_WORD_START_DETECTED) {
-          // best match was found already
-          syncWordDetected = true;
-          break;
-        }
-      }
-    } else {  // this branch is for: correlatorValue < CORRELATION_VALID
-      // looking for the 1st valid correlation value in the buffer
-      if (not globalCorrelationMaxSearchOngoing) {
-        continue;
-      }
-
-      // waiting allowed amount of samples until next local valid correlation region appear
-      if (not localCorrelationMaxSearchOngoing) {
-        // validate if to keep waiting until next valid correlation region (valid correlation areas from the same sync word appear periodically)
-        if (--samplesNoAllowedUntilNextValidCorrelation > 0U) {
-          continue;
-        }
-
-        // when reached here sync word best math was found already (no other valid correlation since samplesNoOfCorrelationMaxRepetition)
-        _correlator[correlationMaxIndex] = SYNC_WORD_START_DETECTED;
-        syncWordDetected = true;
-        break;
-      }
-
-      // when correlation drops below valid value start waiting for next valid region (may appear if sync word best match was not reached yet)
-      localCorrelationMaxSearchOngoing = false;
-      samplesNoAllowedUntilNextValidCorrelation = samplesNoOfCorrelationMaxRepetition;
+    if (correlationDetected) {
+      syncWordDetected = true;
+      syncWordStartIndex = correlatorIndex;
+      break;
     }
   }
 
-  // no matter if sync word best match was found all the data before correlationMaxIndex is not usable (frame data always starts from correlation max index, anything before is garbage)
-  if (firstValidCorrelationIndex != correlationMaxIndex) {
-    _meaningfulDataStartIndex = correlationMaxIndex;
-  } else {
-    // when all correlation values were not valid no data is usable
-    if (firstValidCorrelationIndex == 0U) {
-      _meaningfulDataStartIndex = startIndexOfNotCalculatedCorrelatorData;
-    }
-  }
-
+  // if sync word is not detected invalidate relevant data
   if (not syncWordDetected) {
-    // couldn't detect with currently acquired data
+    _meaningfulDataStartIndex = startIndexOfNotCalculatedCorrelatorData;
     return {};
   }
 
-  return correlationMaxIndex;
+  // all data before syncWordStartIndex is not usable
+  _meaningfulDataStartIndex = syncWordStartIndex;
+  return syncWordStartIndex;
 }
 
 std::optional<uint16_t> DataDecoder::lookupFrameStartIndex() {
