@@ -18,19 +18,19 @@ union ByteTranslator {
 void printFrameContent(const eczas::DataDecoder::TimeFrame& frame) {
   for (auto byte : frame) {
     tools::Helpers::printBinaryValue(byte);
-    printf(" ");
+    printf("(%02X) ", byte);
   }
 }
 
 int main() {
 #ifdef DEBUG
   auto handleRawTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n> Raw time frame (at sample %d):       ", frameDetails.second);
+    printf("\n┌ Raw time frame (at sample %d):       ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
 
   auto handleProcessedTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n> Processed time frame (at sample %d): ", frameDetails.second);
+    printf("\n└ Processed time frame (at sample %d): ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
 #endif
@@ -42,41 +42,45 @@ int main() {
     time_t utcTime{timeDetails.first.utcUnixTimestamp};
     time_t localUtcTime{timeDetails.first.utcUnixTimestamp + (localTimeOffsetInHours * secondsInHour)};
 
-    printf("\n> Time message (from time frame at sample %d): ", timeDetails.second);
-    printf("\n- seconds since year 2000: %d", timeDetails.first.utcTimestamp);
-    printf("\n- seconds since year 1970: %d", timeDetails.first.utcUnixTimestamp);
-    printf("\n- local time zone offset in hours: +%d", localTimeOffsetInHours);
-    printf("\n- UTC time : %s", asctime(gmtime(&utcTime)));
-    printf("- local time (UTC+%d): %s", localTimeOffsetInHours, asctime(gmtime(&localUtcTime)));
+#ifdef DEBUG
+    printf("\n┌ Time message (from time frame at sample %d)\n", timeDetails.second);
+#else
+    printf("\n┌ Time message\n");
+#endif
+
+    printf("├ UTC time          : %s", asctime(gmtime(&utcTime)));
+    printf("├ local time (UTC+%d): %s", localTimeOffsetInHours, asctime(gmtime(&localUtcTime)));
+    printf("├ seconds since year 2000: %d\n", timeDetails.first.utcTimestamp);
+    printf("├ seconds since year 1970: %d\n", timeDetails.first.utcUnixTimestamp);
 
     if (timeDetails.first.timeZoneChangeAnnouncement) {
-      printf("- time zone offset change announced");
+      printf("├ time zone offset change announced\n");
     } else {
-      printf("- no time zone offset change announced");
+      printf("├ no time zone offset change announced\n");
     }
 
     if (timeDetails.first.leapSecondAnnounced) {
       if (timeDetails.first.leapSecondPositive) {
-        printf("\n- positive leap second announced");
+        printf("├ positive leap second announced\n");
       } else {
-        printf("\n- negative leap second announced");
+        printf("├ negative leap second announced\n");
       }
     } else {
-      printf("\n- no leap second announced");
+      printf("├ no leap second announced\n");
     }
 
     switch (timeDetails.first.transmitterState) {
       case eczas::DataDecoder::TransmitterState::PlannedMaintenance1Day:
-        printf("\n- planned transmitter maintenance for 1 day");
+        printf("└ planned transmitter maintenance for 1 day\n");
         break;
       case eczas::DataDecoder::TransmitterState::PlannedMaintenance1Week:
-        printf("\n- planned transmitter maintenance for 1 week");
+        printf("└ planned transmitter maintenance for 1 week\n");
         break;
       case eczas::DataDecoder::TransmitterState::PlannedMaintenanceOver1Week:
-        printf("\n- planned transmitter maintenance for over 1 week");
+        printf("└ planned transmitter maintenance for over 1 week\n");
         break;
       default:
-        printf("\n- transmitter working OK");
+        printf("└ transmitter working OK\n");
         break;
     }
   }};
@@ -109,7 +113,7 @@ int main() {
     sampleNo++;
   }
 
-  printf("\n\nProcessed %d samples.\n", sampleNo);
+  printf("\nProcessed %d samples.\n", --sampleNo);
 
   return 0;
 }

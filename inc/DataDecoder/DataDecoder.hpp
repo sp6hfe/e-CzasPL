@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <limits>
 #include <stdint.h>
 #include <array>
 #include <optional>
@@ -26,15 +25,6 @@ public:
 
   /// @brief Data frame synchronization length in bits
   static constexpr uint8_t SYNC_WORD_BITS_NO{16U};  // arbitrary value
-
-  /// @brief Value indicating sync word start index was detected
-  static constexpr int32_t SYNC_WORD_START_DETECTED{std::numeric_limits<int32_t>::max()};  // well above possible correlation value
-
-  /// @brief Correlation estimate value treated as valid
-  static constexpr int32_t CORRELATION_VALID{static_cast<int32_t>(STREAM_NOISE_HYSTERESIS) * 30U};  // MSB within hysteresis (0) + 15 * at least hysteresis value taken twice
-
-  /// @brief Correlation estimate value treated as invalid
-  static constexpr int32_t CORRELATION_INVALID{std::numeric_limits<int32_t>::min()};  // well below achievable value from correlation calculation
 
   /// @brief Initial value to correclty retrieve frame data from stream
   static constexpr bool FRAME_DATA_READ_START_PRECONDITION{true};
@@ -132,7 +122,7 @@ public:
 private:
   std::array<int16_t, STREAM_SIZE> _stream{};
 
-  std::array<int32_t, STREAM_SIZE> _correlator{};
+  std::array<bool, STREAM_SIZE> _correlator{};
 
   std::array<uint32_t, STREAM_SIZE> _sampleNo{};
 
