@@ -2,10 +2,13 @@
 
 #include <cstdlib>
 #include <stdint.h>
-#include <stdio.h>
 #include <optional>
 #include <tuple>
 #include <utility>
+
+#ifdef DEBUG
+#include <stdio.h>
+#endif
 
 namespace eczas {
 
@@ -267,7 +270,9 @@ void DataDecoder::calculateSyncWordCorrelation() {
 
 bool DataDecoder::isSampleValueOutOfNoiseRegion(uint16_t index) {
   if (index >= STREAM_SIZE) {
+#ifdef DEBUG
     printf("\nE: Sample index is out of range");
+#endif
     return false;
   }
 
@@ -474,7 +479,9 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
     const auto dataByteGetter{getByteFromStream(byteStartIndex, startingBitValueIsOne)};
 
     if (not dataByteGetter.has_value()) {
+#ifdef DEBUG
       printf("\nE: Can't get byte from stream starting at index: %d", byteStartIndex);
+#endif
       return {};
     }
 

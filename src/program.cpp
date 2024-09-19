@@ -23,6 +23,7 @@ void printFrameContent(const eczas::DataDecoder::TimeFrame& frame) {
 }
 
 int main() {
+#ifdef DEBUG
   auto handleRawTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
     printf("\n> Raw time frame (at sample %d):       ", frameDetails.second);
     printFrameContent(frameDetails.first);
@@ -32,6 +33,7 @@ int main() {
     printf("\n> Processed time frame (at sample %d): ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
+#endif
 
   auto handleTimeData{[](std::pair<const eczas::DataDecoder::TimeData&, uint32_t> timeDetails) {
     static constexpr uint32_t secondsInHour{3600U};
@@ -82,8 +84,11 @@ int main() {
   ByteTranslator translator{};
   eczas::DataDecoder decoder{RAW_DATA_SAMPLES_PER_BIT};
 
+#ifdef DEBUG
   decoder.registerTimeFrameRawCallback(handleRawTimeFrameData);
   decoder.registerTimeFrameProcessedCallback(handleProcessedTimeFrameData);
+#endif
+
   decoder.registerTimeDataCallback(handleTimeData);
 
   printf("\ne-CzasPL Radio C++ reference data decoder by SP6HFE\n");
