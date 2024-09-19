@@ -16,9 +16,11 @@ When `.grc` file is run using GNU Radio it will create an output `dump.wav` file
 
 In order to build the C++ application `make` tool is used.
 
-`make all` does the compilation while `make clean` remove all the building process artifacts.
+`make` does the compilation while `make clean` remove all the building process artifacts.
 
-Result of compilation is an executable located in `build/apps` called `eCzasDecoder`.
+Special build which outputs a bit more to the console is available with `make debug` while speed-optimized one is `make release`.
+
+Result of compilation is an executable located in `build/apps` called `eCzasPL`.
 
 ## Running the C++ decoder
 
@@ -26,7 +28,7 @@ To run a decoder against a data stream it is needed to pipe input data via stand
 
 For testing purposes there is an example dump file in `data/` folder called `dump_cropped.raw`. This file is a result of running a GRC flow.
 
-Example use of the dump file with the decoder (assuming you're in the project's top folder): `cat /data/dump_cropped.raw" | ./build/apps/eCzasDecoder`
+Example use of the dump file with the decoder (assuming you're in the project's top folder): `cat /data/dump_cropped.raw | ./build/apps/eCzasPL`
 
 ## Authors and contributors
 

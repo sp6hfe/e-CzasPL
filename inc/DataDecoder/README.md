@@ -30,17 +30,17 @@ Time frame structure is explained in the table below.
 
 ## Time message
 
-Time message consist of 37 bytes which are part of the received time frame.  
+Time message consist of 37 bits which are part of the received time frame.  
 Time message structure is explained in the table below (provided its MSb is numbered here `0` which is a bit `27` in the time frame).
 
-| Bit range                 | Information/purpose                 |
-|:-------------------------:|:------------------------------------|
-| 0(S0)-29(S29)             | Threes of seconds since year 2000   |
-| 30(TZ0)-31(TZ1)           | Local time zone                     |
-| 32(LS)                    | Leap second announcement            |
-| 33(LSS)                   | Leap second sign                    |
-| 34(TZC)                   | Local time zone change announcement |
-| 35(SK0)-36(SK1)           | Transmission site operation state   |
+| Bit range                 | Information/purpose                            |
+|:-------------------------:|:-----------------------------------------------|
+| 0(S0)-29(S29)             | 3-second periods since 01.01.2000 00:00:00 UTC |
+| 30(TZ0)-31(TZ1)           | Local time zone                                |
+| 32(LS)                    | Leap second announcement                       |
+| 33(LSS)                   | Leap second sign                               |
+| 34(TZC)                   | Local time zone change announcement            |
+| 35(SK0)-36(SK1)           | Transmission site operation state              |
 
 ### Seconds since year 2000
 
@@ -49,7 +49,7 @@ Within time message there is a room for 30b timestamp. Because of transmission s
 An example:  
 S0-S29 give the value of `258787930`. It means that a number of seconds since year 2000 is `3*258787930 = 776363790`.
 
-In order to validate the timestamp it is possible to use some online converter [like this][4]. The problem is that it accepts a UNIX timestamp which is a number of seconds since the beginning of UNIX epoh - a year 1970. While between 1970 and 2000 `946684800` seconds elapsed a test value is simply `776363790+946684800 = 1723048590` giving a readout of `Wed Aug 07 2024 16:36:30 GMT+0000` which is correct.
+In order to validate the timestamp it is possible to use some online converter [like this][4]. The problem is that it accepts a UNIX timestamp which is a number of seconds since the beginning of UNIX epoch - a year 1970. While between 1970 and 2000 `946684800` seconds elapsed a test value is simply `776363790+946684800 = 1723048590` giving a readout of `Wed Aug 07 2024 16:36:30 GMT+0000` which is correct.
 
 ### Local time zone
 
@@ -117,7 +117,7 @@ In case of inconsistency an error correction is needed (it will be explained in 
 CRC8 calculation is widely described (i.e. [here][5]) and important information to know is:
 * polynomial: `0x07`
 * initialization value: `0x00`
-* checksum is calculated `over scrambled data` (meaning data validation is pretty straigh-forward)
+* checksum is calculated `over scrambled data` (meaning data validation is pretty straight-forward)
 
 
 ## Reed-Solomon error correction
