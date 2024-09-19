@@ -194,10 +194,13 @@ bool DataDecoder::processNewSample(int16_t sample) {
             _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
           }
         }
-      }
 
-      // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
-      _meaningfulDataStartIndex = lastIndexOfTheTimeFrame;
+        // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
+        _meaningfulDataStartIndex = lastIndexOfTheTimeFrame;
+      } else {
+        // currently extracted frame doesn't look like the one we are looking for - increase _meaningfulDataStartIndex by one
+        _meaningfulDataStartIndex++;
+      }
     }
   }
 
