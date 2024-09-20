@@ -93,22 +93,35 @@ bool DataDecoder::processNewSample(int16_t sample) {
           _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
 
-        // check CRC8 to see if any error correction is needed
-        uint8_t crc8 = 0U;
+        auto timeMessageDataValid{true};
+
+        // lookup and correct errors (Reed-Solomon)
         {
+#ifdef DEBUG
+          printf("\nX Reed-Solomon error correction not yet implemented");
+#endif
+          // this code shuld update timeMessageDataValid
+        }
+
+        // check CRC8 to see if time data is consistent
+        if (timeMessageDataValid) {
           tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
           crc.init();
           for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
             crc.update(timeFrame.at(byteNo));
           }
-          crc8 = crc.getCrc8();
+          timeMessageDataValid = (crc.getCrc8() == timeFrame.at(11));
+#ifdef DEBUG
+          if (not timeMessageDataValid) {
+            printf("\nE CRC8 validation of time data failed");
+          }
+#endif
         }
-        const auto timeMessageDataValid{crc8 == timeFrame.at(11)};
 
         // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
         if (not timeMessageDataValid) {
 #ifdef DEBUG
-          printf("\nX CRC8 issue - can't fix errors yet using Reed-Solomon data");
+          printf("\nE Received data is not consistent; dropping the frame");
 #endif
         }
 
