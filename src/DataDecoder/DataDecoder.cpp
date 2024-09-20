@@ -97,9 +97,28 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
         // lookup and correct errors (Reed-Solomon)
         {
-#ifdef DEBUG
-          printf("\nX Reed-Solomon error correction not yet implemented");
-#endif
+          auto rsDataIndex{0U};
+          // not aligned bits S0-SK0
+          for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
+            // get reminder of the previous symbol (bits 7-5)
+            if (frameByteNo != 3U) {
+              _reedSolomonData[rsDataIndex++] += ((timeFrame.at(frameByteNo) >> 5U) & 0x07);
+            }
+            // get full symbol between (bits 4-1)
+            _reedSolomonData[rsDataIndex++] = ((timeFrame.at(frameByteNo) >> 1U) & 0x0F);
+            // get MSb of the next symbol (bit 0)
+            if (frameByteNo != 7U) {
+              _reedSolomonData[rsDataIndex] = ((timeFrame.at(frameByteNo) & 0x01) << 3U);
+            }
+          }
+          // aligned bits in bytes ECC0-ECC2
+          for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
+            _reedSolomonData[rsDataIndex++] = ((timeFrame.at(frameByteNo) >> 4U) & 0x0F);
+            _reedSolomonData[rsDataIndex++] = (timeFrame.at(frameByteNo) & 0x0F);
+          }
+          if (_reedSolomonCodeWordCallback) {
+            _reedSolomonCodeWordCallback({_reedSolomonData, _sampleNo[frameStartIndex.value()]});
+          }
           // this code shuld update timeMessageDataValid
         }
 
@@ -234,6 +253,10 @@ void DataDecoder::registerTimeFrameRawCallback(TimeFrameCallback callback) {
 
 void DataDecoder::registerTimeFrameProcessedCallback(TimeFrameCallback callback) {
   _timeFrameProcessedCallback = std::move(callback);
+}
+
+void DataDecoder::registerReedSolomonDataWordCallback(ReedSolomonCodeWordCallback callback) {
+  _reedSolomonCodeWordCallback = std::move(callback);
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {

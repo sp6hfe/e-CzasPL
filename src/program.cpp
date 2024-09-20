@@ -22,16 +22,28 @@ void printFrameContent(const eczas::DataDecoder::TimeFrame& frame) {
   }
 }
 
+void printReedSolomonCodeWord(const eczas::DataDecoder::ReedSolomonCodeWord& codeWord) {
+  for (auto byte : codeWord) {
+    tools::Helpers::printBinaryValuePart(byte, false);
+    printf("(%02X) ", byte);
+  }
+}
+
 int main() {
 #ifdef DEBUG
   auto handleRawTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n┌ Raw time frame (at sample %d):       ", frameDetails.second);
+    printf("\n┌ Raw time frame (at sample %d):         ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
 
   auto handleProcessedTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n└ Processed time frame (at sample %d): ", frameDetails.second);
+    printf("\n└ Processed time frame (at sample %d):   ", frameDetails.second);
     printFrameContent(frameDetails.first);
+  }};
+
+  auto handleReedSolomonCodeWordData{[](std::pair<const eczas::DataDecoder::ReedSolomonCodeWord&, uint32_t> codeWordDetails) {
+    printf("\n├ Reed-Solomon code word (at sample %d): ", codeWordDetails.second);
+    printReedSolomonCodeWord(codeWordDetails.first);
   }};
 #endif
 
@@ -91,6 +103,7 @@ int main() {
 #ifdef DEBUG
   decoder.registerTimeFrameRawCallback(handleRawTimeFrameData);
   decoder.registerTimeFrameProcessedCallback(handleProcessedTimeFrameData);
+  decoder.registerReedSolomonDataWordCallback(handleReedSolomonCodeWordData);
 #endif
 
   decoder.registerTimeDataCallback(handleTimeData);

@@ -71,11 +71,17 @@ public:
   /// @brief Time frame data container
   using TimeFrame = std::array<uint8_t, TIME_FRAME_BYTES_NO>;
 
+  /// @brief Reed-Solomon code word container (4-bit symbol ber byte)
+  using ReedSolomonCodeWord = std::array<uint8_t, 15U>;
+
   /// @brief Time data reception callback (time data, frame start sample no)
   using TimeDataCallback = std::function<void(std::pair<const TimeData&, uint32_t>)>;
 
   /// @brief Time frame reception callback (time frame, frame start sample no)
   using TimeFrameCallback = std::function<void(std::pair<const TimeFrame&, uint32_t>)>;
+
+  /// @brief Reed-Solomon code word reception callback
+  using ReedSolomonCodeWordCallback = std::function<void(std::pair<const ReedSolomonCodeWord&, uint32_t>)>;
 
   /**
    * @brief Constructor
@@ -102,11 +108,18 @@ public:
   void registerTimeFrameRawCallback(TimeFrameCallback callback);
 
   /**
-   * @brief Register processed time frame reception
+   * @brief Register processed time frame reception callback
    *
    * @param callback The callback
    */
   void registerTimeFrameProcessedCallback(TimeFrameCallback callback);
+
+  /**
+   * @brief Register Reed-Solomon code word extraction callback
+   *
+   * @param callback The callback
+   */
+  void registerReedSolomonDataWordCallback(ReedSolomonCodeWordCallback callback);
 
   /**
    * @brief Process new sample
@@ -126,13 +139,17 @@ private:
 
   std::array<uint32_t, STREAM_SIZE> _sampleNo{};
 
-  const std::array<uint8_t, 5> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
+  ReedSolomonCodeWord _reedSolomonData{};
+
+  const std::array<uint8_t, 5U> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
 
   TimeDataCallback _timeDataCallback{nullptr};
 
   TimeFrameCallback _timeFrameRawCallback{nullptr};
 
   TimeFrameCallback _timeFrameProcessedCallback{nullptr};
+
+  ReedSolomonCodeWordCallback _reedSolomonCodeWordCallback{nullptr};
 
   uint8_t _streamSamplesPerBit;
 
