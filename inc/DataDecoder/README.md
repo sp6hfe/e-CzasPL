@@ -94,40 +94,29 @@ Schedule for such an event is encoded on bits `SK0` and `SK1` and described in t
 |  0  |  1  | Planned 1 week maintenance          |
 |  1  |  1  | Planned maintenance for over 1 week |
 
-## Time data scrambling
-
-On transmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`.  
-Out of the magic number only 37 least significant bits are used for scrambling.
-
-Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
-
-On reception side it is needed to reverse the operation by effectively doing the same operation. This time it is called de-scrambling.
-
-Scrambling is a form of data encryption, but whenever you publicly show the key there is no point in doing so.
-Probably there will be a service, in future, where some of the time frames will be encrypted using a key shared only with trusted partners who may be signing an NDA or other agreements. This may be to increase level of trust in the synchronization achieved over the radio link.
-By that time all mechanisms are already in place :)
-
 ## Reed-Solomon error correction
 
 In order to strengthen time information reception a Reed-Solomon error correction algorithm is used.  
 Time frame bytes `8`(ECC0) to `10`(ECC2) consist of 6 redundant 4-bit symbols which are added in order to allow recovery of possibly corrupted bits `27`S0 to `35`SK0 (bit `36`(SK1) is not covered).  
 
-Reed-Solomon error correction bytes are calculated over Galois field `GF(2)` due to binary nature of transmitted data.  
+Reed-Solomon error correction bytes are calculated over extended Galois field `GF(2)` (due to binary nature of transmitted data).  
 
 Important information to know is:
-* symbol size `m=4` bits,
-* maximum length of code word is `n=15` symbols (2^m-1),
-* within that code word we want to secure `k=9` 4-bit symbols of time data,
-* that gives possibility to recover up to `t=3` corrupted symbols of data ((n-k)/2),
-* in order to secure `k` symbols of data `2t` symbols of redundand FEC data needs to be added (2\*3\*4bits = 24bits),
-* primitive polynomial used for Galois field configuration is `x^2+x+1` (decimal 19),
-* primitive element used for Galois field configuration is `x` (decimal 2),
+* the smallest chunk of data is called *a symbol* and it is selected to be `m=4` bits long (thus Galois field used here is `GF(2^4)=GF(16)`),
+* maximum length of code word (a sentence secured with error correction) is `n=15` symbols long (2^m-1),
+* within that code word `k=9` symbols is dedicated to time data (we should cover 37 bits of time message but it would require one bit from additional symbol),
+* having code word size of `15` symbols and useful data size of `9` symbols what's left is `6` symbols for FEC data,
+* such additional 6 symbols for error correction are called `2t` giving the possibility to recover up to any `t=3` corrupted symbols from the entire code word ((n-k)/2),
+* `2t` symbols of FEC data costs `2\*3\*4 bits = 24 bits`,
+* above configuration of Reed-Solomon error correction coding is called `RS(15,9)`,
+* primitive polynomial used for Galois field initialization is `x^2+x+1` (decimal 19),
+* primitive element used for Galois field initialization is `x` (decimal 2),
 * polynomial roots generator has initial root `b=1`,
 * transmitted information (code word) is represented by the coefficients of the polymomial of the order `n-1` (14).
 
 Reed-Solomon RS(15,9) decoding algorithm run over time message data S0-SK0 concatenated with ECC0-ECC2 should either correct errors or fail.
 
-Received 4-bit chunks are coefficients of the code word's polynomial organized as below:
+Received 4 bit chunks are coefficients of the code word's polynomial organized as below:
 * value of 4-bit symbol LS-SK0 is a coefficient of `x^14`,
 * value of 4-bit symbol S0-S3 is a coefficient of `x^6`,
 * value of 4-bit symbol (lower part of ECC2) is a coefficient of `x^5`,
@@ -135,9 +124,8 @@ Received 4-bit chunks are coefficients of the code word's polynomial organized a
 
 
 To play around with the data [here][6] is a good resource.  
-A good explanation of the topic is [here][7] and [here][8].  
-Some other valuable resources I have found interesting are [here][9], [here][10], [here][11] and [here][12].
-
+A good explanation of the topic is [here][7], [here][8] and [here][9].  
+Some other valuable resources I have found interesting are [here][10], [here][11], [here][12], and [here][13].
 
 ## CRC-8
 
@@ -151,6 +139,19 @@ CRC8 calculation is widely described (i.e. [here][5]) and important information 
 * initialization value: `0x00`
 * checksum is calculated `over scrambled data` (meaning data validation is pretty straight-forward)
 
+## Time data scrambling
+
+On transmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`.  
+Out of the magic number only 37 least significant bits are used for scrambling.
+
+Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
+
+On reception side it is needed to reverse the operation by effectively doing the same operation. This time it is called de-scrambling.
+
+Scrambling is a form of data encryption, but whenever you publicly show the key there is no point in doing so.
+Probably there will be a service, in future, where some of the time frames will be encrypted using a key shared only with trusted partners who may be signing an NDA or other agreements. This may be to increase level of trust in the synchronization achieved over the radio link.
+By that time all mechanisms are already in place :)
+
 
 [1]: https://e-czas.gum.gov.pl/e-czas-radio/
 [2]: https://en.wikipedia.org/wiki/Phase-shift_keying
@@ -158,11 +159,12 @@ CRC8 calculation is widely described (i.e. [here][5]) and important information 
 [4]: https://www.unixtimestamp.com/
 [5]: http://www.sunshine2k.de/articles/coding/crc/understanding_crc.html
 [6]: https://www.ujamjar.com/demo/ocaml/2014/06/18/reed-solomon-demo.html
-[7]: https://berthub.eu/articles/posts/reed-solomon-for-programmers/
-[8]: https://siglead.com/en/technology-eg/reed-solomoncode/
-[9]: https://mathworld.wolfram.com/PrimitivePolynomial.html
-[10]: https://core.ac.uk/download/pdf/16697418.pdf
+[7]: https://ntrs.nasa.gov/api/citations/19900019023/downloads/19900019023.pdf
+[8]: https://berthub.eu/articles/posts/reed-solomon-for-programmers/
+[9]: https://siglead.com/en/technology-eg/reed-solomoncode/
+[10]: https://mathworld.wolfram.com/PrimitivePolynomial.html
+[110]: https://core.ac.uk/download/pdf/16697418.pdf
 [11]: https://aspur.rs/jemit/archive/v3/n3/7.pdf
-[12]: http://www.iraj.in/journal/journal_file/journal_pdf/1-605-15767466889-13.pdf
+[13]: http://www.iraj.in/journal/journal_file/journal_pdf/1-605-15767466889-13.pdf
 
 [timeFrame]: ../../doc/img/eCzasPL_time_frame.jpg "e-CzasPL Radio time frame (source: e-CzasPL documentation)"
