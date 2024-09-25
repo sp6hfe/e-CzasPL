@@ -1,3 +1,6 @@
 [submodule "external/sp5wwp/e-Czas"]
 	path = external/sp5wwp/e-Czas
 	url = https://github.com/sp5wwp/e-Czas.git
+[submodule "external/ArashPartow/schifra"]
+	path = external/ArashPartow/schifra
+	url = https://github.com/ArashPartow/schifra.git
