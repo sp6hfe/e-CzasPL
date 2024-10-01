@@ -109,7 +109,7 @@ Important information to know is:
 * such additional 6 symbols for error correction are called `2t` giving the possibility to recover up to any `t=3` corrupted symbols from the entire code word ((n-k)/2),
 * `2t` symbols of FEC data costs `2\*3\*4 bits = 24 bits`,
 * above configuration of Reed-Solomon error correction coding is called `RS(15,9)`,
-* primitive polynomial used for Galois field initialization is `x^2+x+1` (decimal 19),
+* primitive polynomial used for Galois field initialization is `x^4+x+1` (decimal 19),
 * primitive element used for Galois field initialization is `x` (decimal 2),
 * polynomial roots generator has initial root `b=1`,
 * transmitted information (code word) is represented by the coefficients of the polymomial of the order `n-1` (14).
