@@ -8,11 +8,15 @@ OBJ_DIR  = $(BUILD)/objects
 APP_DIR  = $(BUILD)/apps
 TARGET   = program
 
-INCLUDE  = -Iinc/
-SRC      =                      \
+INCLUDE  =                           \
+   -Iinc/                            \
+   -Ilib/ReedSolomon/
+
+SRC      =                           \
    $(wildcard src/DataDecoder/*.cpp) \
-   $(wildcard src/Tools/*.cpp) \
-   $(wildcard src/*.cpp)         \
+   $(wildcard src/Tools/*.cpp)       \
+   $(wildcard src/*.cpp)             \
+   $(wildcard lib/*.cpp)
 
 OBJECTS  = $(SRC:%.cpp=$(OBJ_DIR)/%.o)
 DEPENDENCIES \
