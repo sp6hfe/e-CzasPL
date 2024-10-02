@@ -44,8 +44,16 @@
    during use.
                                  Simon Rockliff, 26th June 1991
 
-  Original code adopted to become a templated C++ class allowing for effective
+                  Update
+                 --------
+  Code adopted to become a templated C++ class allowing for effective
   compile-time parametrization of the Reed-Solomon encoder/decoder.
+  Original file: https://www.eccpage.com/rs.c
+  Variable names that were changed:
+    mm -> BitsPerSymbol
+    nn -> codewordSize
+    tt -> AmountOfCorrectableSymbols
+    kk -> dataSize
                                  Grzegorz Kaczmarek, SP6HFE, 2024
 */
 
