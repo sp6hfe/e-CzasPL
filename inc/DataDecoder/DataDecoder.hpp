@@ -157,6 +157,8 @@ private:
 
   uint16_t _meaningfulDataStartIndex{STREAM_SIZE};
 
+  reedsolomon::ReedSolomon<4U, 3U> _reedSolomon{};  // RS(15,9) -> 4bit symbol -> 15 symbols in codeword, 9 symbols of data -> 3 symbols of correctable
+
   void calculateSyncWordCorrelation();
 
   bool isSampleValueOutOfNoiseRegion(uint16_t index);
@@ -170,8 +172,6 @@ private:
   bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
-
-  reedsolomon::ReedSolomon<4U, 3U> _reedSolomon{};  // RS(15,9) -> 4bit symbol -> 15 symbols in codeword, 9 symbols of data -> 3 symbols of correctable
 };
 
 }  // namespace eczas
