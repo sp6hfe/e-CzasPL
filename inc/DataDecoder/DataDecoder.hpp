@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ReedSolomon/ReedSolomon.hpp>
+
 #include <functional>
 #include <stdint.h>
 #include <array>
@@ -168,6 +170,8 @@ private:
   bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
+
+  reedsolomon::ReedSolomon<4U, 3U> _reedSolomon{};  // RS(15,9) -> 4bit symbol -> 15 symbols in codeword, 9 symbols of data -> 3 symbols of correctable
 };
 
 }  // namespace eczas

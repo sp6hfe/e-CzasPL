@@ -10,13 +10,13 @@ TARGET   = program
 
 INCLUDE  =                           \
    -Iinc/                            \
-   -Ilib/ReedSolomon/
+   -Ilib/
 
 SRC      =                           \
    $(wildcard src/DataDecoder/*.cpp) \
    $(wildcard src/Tools/*.cpp)       \
    $(wildcard src/*.cpp)             \
-   $(wildcard lib/*.cpp)
+   $(wildcard lib/ReedSolomon/*.cpp)
 
 OBJECTS  = $(SRC:%.cpp=$(OBJ_DIR)/%.o)
 DEPENDENCIES \

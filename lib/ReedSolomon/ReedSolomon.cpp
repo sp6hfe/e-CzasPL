@@ -45,7 +45,9 @@
    during use.
                                  Simon Rockliff, 26th June 1991
 
-  Adaptations for usage via C++ wrapper Grzegorz Kaczmarek, SP6HFE, 2024
+  Original code adopted to become a templated C++ class allowing for effective
+  compile-time parametrization of the Reed-Solomon encoder/decoder.
+                                 Grzegorz Kaczmarek, SP6HFE, 2024
 */
 
 #include "ReedSolomon.hpp"
@@ -55,14 +57,31 @@
 
 namespace reedsolomon {
 
-#define mm 4  /* RS code over GF(2**4) - change to suit */
-#define nn 15 /* nn=2**mm -1   length of codeword */
-#define tt 3  /* number of errors that can be corrected */
-#define kk 9  /* kk = nn-2*tt  */
+template <uint8_t BitsPerSymbol, uint8_t AmountOfCorrectableSymbols>
+ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::ReedSolomon() : _bitsPerSymbol(BitsPerSymbol), _correctableSymbols(AmountOfCorrectableSymbols) {
+  // Initialize polynomial coefficients
+  uint8_t index{0U};
 
-int pp[mm + 1] = {1, 1, 0, 0, 1}; /* specify irreducible polynomial coeffts */
-// int alpha_to[nn + 1], index_of[nn + 1], gg[nn - kk + 1];
-// int recd[nn], data[kk], bb[nn - kk];
+  if constexpr (BitsPerSymbol == 2U) {
+    //   /* 1 + x + x^2 */
+    for (auto newValue : {1, 1, 1}) {
+      pp[index++] = newValue;
+    }
+  } else if constexpr (BitsPerSymbol == 3) {
+    //   /* 1 + x + x^3 */
+    for (auto newValue : {1, 1, 0, 1}) {
+      pp[index++] = newValue;
+    }
+  } else if constexpr (BitsPerSymbol == 4) {
+    //   /* 1 + x + x^4 */
+    for (auto newValue : {1, 1, 0, 0, 1}) {
+      pp[index++] = newValue;
+    }
+  } else {
+  }
+  // No initialization in case of not supported BitsPerSymbol value
+  return;
+}
 
 template <uint8_t BitsPerSymbol, uint8_t AmountOfCorrectableSymbols>
 void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::generate_gf()
@@ -72,22 +91,22 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::generate_gf()
    alpha=2 is the primitive element of GF(2**mm)
 */
 {
-  register int i, mask;
+  int i, mask;
 
   mask = 1;
-  alpha_to[mm] = 0;
-  for (i = 0; i < mm; i++) {
+  alpha_to[BitsPerSymbol] = 0;
+  for (i = 0; i < BitsPerSymbol; i++) {
     alpha_to[i] = mask;
     index_of[alpha_to[i]] = i;
     if (pp[i] != 0)
-      alpha_to[mm] ^= mask;
+      alpha_to[BitsPerSymbol] ^= mask;
     mask <<= 1;
   }
-  index_of[alpha_to[mm]] = mm;
+  index_of[alpha_to[BitsPerSymbol]] = BitsPerSymbol;
   mask >>= 1;
-  for (i = mm + 1; i < nn; i++) {
+  for (i = BitsPerSymbol + 1; i < codewordSize; i++) {
     if (alpha_to[i - 1] >= mask)
-      alpha_to[i] = alpha_to[mm] ^ ((alpha_to[i - 1] ^ mask) << 1);
+      alpha_to[i] = alpha_to[BitsPerSymbol] ^ ((alpha_to[i - 1] ^ mask) << 1);
     else
       alpha_to[i] = alpha_to[i - 1] << 1;
     index_of[alpha_to[i]] = i;
@@ -101,21 +120,21 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::gen_poly()
   nn=(2**mm -1) Reed Solomon code  from the product of (X+alpha**i), i=1..2*tt
 */
 {
-  register int i, j;
+  int i, j;
 
   gg[0] = 2; /* primitive element alpha = 2  for GF(2**mm)  */
   gg[1] = 1; /* g(x) = (X+alpha) initially */
-  for (i = 2; i <= nn - kk; i++) {
+  for (i = 2; i <= codewordSize - dataSize; i++) {
     gg[i] = 1;
     for (j = i - 1; j > 0; j--)
       if (gg[j] != 0)
-        gg[j] = gg[j - 1] ^ alpha_to[(index_of[gg[j]] + i) % nn];
+        gg[j] = gg[j - 1] ^ alpha_to[(index_of[gg[j]] + i) % codewordSize];
       else
         gg[j] = gg[j - 1];
-    gg[0] = alpha_to[(index_of[gg[0]] + i) % nn]; /* gg[0] can never be zero */
+    gg[0] = alpha_to[(index_of[gg[0]] + i) % codewordSize]; /* gg[0] can never be zero */
   }
   /* convert gg[] to index form for quicker encoding */
-  for (i = 0; i <= nn - kk; i++) gg[i] = index_of[gg[i]];
+  for (i = 0; i <= codewordSize - dataSize; i++) gg[i] = index_of[gg[i]];
 }
 
 template <uint8_t BitsPerSymbol, uint8_t AmountOfCorrectableSymbols>
@@ -127,21 +146,21 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::encode_rs()
    connections specified by the elements of gg[], which was generated above.
    Codeword is   c(X) = data(X)*X**(nn-kk)+ b(X)          */
 {
-  register int i, j;
+  int i, j;
   int feedback;
 
-  for (i = 0; i < nn - kk; i++) bb[i] = 0;
-  for (i = kk - 1; i >= 0; i--) {
-    feedback = index_of[data[i] ^ bb[nn - kk - 1]];
+  for (i = 0; i < codewordSize - dataSize; i++) bb[i] = 0;
+  for (i = dataSize - 1; i >= 0; i--) {
+    feedback = index_of[data[i] ^ bb[codewordSize - dataSize - 1]];
     if (feedback != -1) {
-      for (j = nn - kk - 1; j > 0; j--)
+      for (j = codewordSize - dataSize - 1; j > 0; j--)
         if (gg[j] != -1)
-          bb[j] = bb[j - 1] ^ alpha_to[(gg[j] + feedback) % nn];
+          bb[j] = bb[j - 1] ^ alpha_to[(gg[j] + feedback) % codewordSize];
         else
           bb[j] = bb[j - 1];
-      bb[0] = alpha_to[(gg[0] + feedback) % nn];
+      bb[0] = alpha_to[(gg[0] + feedback) % codewordSize];
     } else {
-      for (j = nn - kk - 1; j > 0; j--)
+      for (j = codewordSize - dataSize - 1; j > 0; j--)
         bb[j] = bb[j - 1];
       bb[0] = 0;
     };
@@ -169,18 +188,18 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
    parity part of the transmitted codeword).  Of course, these insoluble cases
    can be returned as error flags to the calling routine if desired.   */
 {
-  register int i, j, u, q;
-  int elp[nn - kk + 2][nn - kk], d[nn - kk + 2], l[nn - kk + 2], u_lu[nn - kk + 2], s[nn - kk + 1];
-  int count = 0, syn_error = 0, root[tt], loc[tt], z[tt + 1], err[nn], reg[tt + 1];
+  int i, j, u, q;
+  int elp[codewordSize - dataSize + 2][codewordSize - dataSize], d[codewordSize - dataSize + 2], l[codewordSize - dataSize + 2], u_lu[codewordSize - dataSize + 2], s[codewordSize - dataSize + 1];
+  int count = 0, syn_error = 0, root[AmountOfCorrectableSymbols], loc[AmountOfCorrectableSymbols], z[AmountOfCorrectableSymbols + 1], err[codewordSize], reg[AmountOfCorrectableSymbols + 1];
 
   /* first form the syndromes */
-  for (i = 1; i <= nn - kk; i++) {
+  for (i = 1; i <= codewordSize - dataSize; i++) {
     s[i] = 0;
-    for (j = 0; j < nn; j++)
+    for (j = 0; j < codewordSize; j++)
       if (recd[j] != -1)
-        s[i] ^= alpha_to[(recd[j] + i * j) % nn]; /* recd[j] in index form */
-                                                  /* convert syndrome from polynomial form to index form  */
-    if (s[i] != 0) syn_error = 1;                 /* set flag if non-zero syndrome => error */
+        s[i] ^= alpha_to[(recd[j] + i * j) % codewordSize]; /* recd[j] in index form */
+                                                            /* convert syndrome from polynomial form to index form  */
+    if (s[i] != 0) syn_error = 1;                           /* set flag if non-zero syndrome => error */
     s[i] = index_of[s[i]];
   };
 
@@ -198,7 +217,7 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
     d[1] = s[1];   /* index form */
     elp[0][0] = 0; /* index form */
     elp[1][0] = 1; /* polynomial form */
-    for (i = 1; i < nn - kk; i++) {
+    for (i = 1; i < codewordSize - dataSize; i++) {
       elp[0][i] = -1; /* index form */
       elp[1][i] = 0;  /* polynomial form */
     }
@@ -239,10 +258,10 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
           l[u + 1] = l[q] + u - q;
 
         /* form new elp(x) */
-        for (i = 0; i < nn - kk; i++) elp[u + 1][i] = 0;
+        for (i = 0; i < codewordSize - dataSize; i++) elp[u + 1][i] = 0;
         for (i = 0; i <= l[q]; i++)
           if (elp[q][i] != -1)
-            elp[u + 1][i + u - q] = alpha_to[(d[u] + nn - d[q] + elp[q][i]) % nn];
+            elp[u + 1][i + u - q] = alpha_to[(d[u] + codewordSize - d[q] + elp[q][i]) % codewordSize];
         for (i = 0; i <= l[u]; i++) {
           elp[u + 1][i] ^= elp[u][i];
           elp[u][i] = index_of[elp[u][i]]; /*convert old elp value to index*/
@@ -251,7 +270,7 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
       u_lu[u + 1] = u - l[u + 1];
 
       /* form (u+1)th discrepancy */
-      if (u < nn - kk) /* no discrepancy computed on last iteration */
+      if (u < codewordSize - dataSize) /* no discrepancy computed on last iteration */
       {
         if (s[u + 1] != -1)
           d[u + 1] = alpha_to[s[u + 1]];
@@ -259,13 +278,13 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
           d[u + 1] = 0;
         for (i = 1; i <= l[u + 1]; i++)
           if ((s[u + 1 - i] != -1) && (elp[u + 1][i] != 0))
-            d[u + 1] ^= alpha_to[(s[u + 1 - i] + index_of[elp[u + 1][i]]) % nn];
+            d[u + 1] ^= alpha_to[(s[u + 1 - i] + index_of[elp[u + 1][i]]) % codewordSize];
         d[u + 1] = index_of[d[u + 1]]; /* put d[u+1] into index form */
       }
-    } while ((u < nn - kk) && (l[u + 1] <= tt));
+    } while ((u < codewordSize - dataSize) && (l[u + 1] <= AmountOfCorrectableSymbols));
 
     u++;
-    if (l[u] <= tt) /* can correct error */
+    if (l[u] <= AmountOfCorrectableSymbols) /* can correct error */
     {
       /* put elp into index form */
       for (i = 0; i <= l[u]; i++) elp[u][i] = index_of[elp[u][i]];
@@ -274,17 +293,17 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
       for (i = 1; i <= l[u]; i++)
         reg[i] = elp[u][i];
       count = 0;
-      for (i = 1; i <= nn; i++) {
+      for (i = 1; i <= codewordSize; i++) {
         q = 1;
         for (j = 1; j <= l[u]; j++)
           if (reg[j] != -1) {
-            reg[j] = (reg[j] + j) % nn;
+            reg[j] = (reg[j] + j) % codewordSize;
             q ^= alpha_to[reg[j]];
           };
         if (!q) /* store root and error location number indices */
         {
           root[count] = i;
-          loc[count] = nn - i;
+          loc[count] = codewordSize - i;
           count++;
         };
       };
@@ -303,12 +322,12 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
             z[i] = 0;
           for (j = 1; j < i; j++)
             if ((s[j] != -1) && (elp[u][i - j] != -1))
-              z[i] ^= alpha_to[(elp[u][i - j] + s[j]) % nn];
+              z[i] ^= alpha_to[(elp[u][i - j] + s[j]) % codewordSize];
           z[i] = index_of[z[i]]; /* put into index form */
         };
 
         /* evaluate errors at locations given by error location numbers loc[i] */
-        for (i = 0; i < nn; i++) {
+        for (i = 0; i < codewordSize; i++) {
           err[i] = 0;
           if (recd[i] != -1) /* convert recd[] to polynomial form */
             recd[i] = alpha_to[recd[i]];
@@ -320,32 +339,32 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
           err[loc[i]] = 1; /* accounts for z[0] */
           for (j = 1; j <= l[u]; j++)
             if (z[j] != -1)
-              err[loc[i]] ^= alpha_to[(z[j] + j * root[i]) % nn];
+              err[loc[i]] ^= alpha_to[(z[j] + j * root[i]) % codewordSize];
           if (err[loc[i]] != 0) {
             err[loc[i]] = index_of[err[loc[i]]];
             q = 0; /* form denominator of error term */
             for (j = 0; j < l[u]; j++)
               if (j != i)
-                q += index_of[1 ^ alpha_to[(loc[j] + root[i]) % nn]];
-            q = q % nn;
-            err[loc[i]] = alpha_to[(err[loc[i]] - q + nn) % nn];
+                q += index_of[1 ^ alpha_to[(loc[j] + root[i]) % codewordSize]];
+            q = q % codewordSize;
+            err[loc[i]] = alpha_to[(err[loc[i]] - q + codewordSize) % codewordSize];
             recd[loc[i]] ^= err[loc[i]]; /*recd[i] must be in polynomial form */
           }
         }
-      } else                     /* no. roots != degree of elp => >tt errors and cannot solve */
-        for (i = 0; i < nn; i++) /* could return error flag if desired */
-          if (recd[i] != -1)     /* convert recd[] to polynomial form */
+      } else                               /* no. roots != degree of elp => >tt errors and cannot solve */
+        for (i = 0; i < codewordSize; i++) /* could return error flag if desired */
+          if (recd[i] != -1)               /* convert recd[] to polynomial form */
             recd[i] = alpha_to[recd[i]];
           else
-            recd[i] = 0;       /* just output received codeword as is */
-    } else                     /* elp has degree has degree >tt hence cannot solve */
-      for (i = 0; i < nn; i++) /* could return error flag if desired */
-        if (recd[i] != -1)     /* convert recd[] to polynomial form */
+            recd[i] = 0;                 /* just output received codeword as is */
+    } else                               /* elp has degree has degree >tt hence cannot solve */
+      for (i = 0; i < codewordSize; i++) /* could return error flag if desired */
+        if (recd[i] != -1)               /* convert recd[] to polynomial form */
           recd[i] = alpha_to[recd[i]];
         else
           recd[i] = 0; /* just output received codeword as is */
   } else               /* no non-zero syndromes => no errors: output received codeword */
-    for (i = 0; i < nn; i++)
+    for (i = 0; i < codewordSize; i++)
       if (recd[i] != -1) /* convert recd[] to polynomial form */
         recd[i] = alpha_to[recd[i]];
       else
@@ -353,62 +372,3 @@ void ReedSolomon<BitsPerSymbol, AmountOfCorrectableSymbols>::decode_rs()
 }
 
 }  // namespace reedsolomon
-
-// main() {
-//   register int i;
-
-//   /* generate the Galois Field GF(2**mm) */
-//   generate_gf();
-//   printf("Look-up tables for GF(2**%2d)\n", mm);
-//   printf("  i   alpha_to[i]  index_of[i]\n");
-//   for (i = 0; i <= nn; i++)
-//     printf("%3d      %3d          %3d\n", i, alpha_to[i], index_of[i]);
-//   printf("\n\n");
-
-//   /* compute the generator polynomial for this RS code */
-//   gen_poly();
-
-//   /* for known data, stick a few numbers into a zero codeword. Data is in
-//      polynomial form.
-//   */
-//   for (i = 0; i < kk; i++) data[i] = 0;
-
-//   /* for example, say we transmit the following message (nothing special!) */
-//   data[0] = 8;
-//   data[1] = 6;
-//   data[2] = 8;
-//   data[3] = 1;
-//   data[4] = 2;
-//   data[5] = 4;
-//   data[6] = 15;
-//   data[7] = 9;
-//   data[8] = 9;
-
-//   /* encode data[] to produce parity in bb[].  Data input and parity output
-//      is in polynomial form
-//   */
-//   encode_rs();
-
-//   /* put the transmitted codeword, made up of data plus parity, in recd[] */
-//   for (i = 0; i < nn - kk; i++) recd[i] = bb[i];
-//   for (i = 0; i < kk; i++) recd[i + nn - kk] = data[i];
-
-//   /* if you want to test the program, corrupt some of the elements of recd[]
-//      here. This can also be done easily in a debugger. */
-//   /* Again, lets say that a middle element is changed */
-//   data[nn - nn / 2] = 3;
-
-//   for (i = 0; i < nn; i++)
-//     recd[i] = index_of[recd[i]]; /* put recd[i] into index form */
-
-//   /* decode recv[] */
-//   decode_rs(); /* recd[] is returned in polynomial form */
-
-//   /* print out the relevant stuff - initial and decoded {parity and message} */
-//   printf("Results for Reed-Solomon code (n=%3d, k=%3d, t= %3d)\n\n", nn, kk, tt);
-//   printf("  i  data[i]   recd[i](decoded)   (data, recd in polynomial form)\n");
-//   for (i = 0; i < nn - kk; i++)
-//     printf("%3d    %3d      %3d\n", i, bb[i], recd[i]);
-//   for (i = nn - kk; i < nn; i++)
-//     printf("%3d    %3d      %3d\n", i, data[i - nn + kk], recd[i]);
-// }
