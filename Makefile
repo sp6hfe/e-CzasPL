@@ -10,7 +10,7 @@ TARGET   = program
 
 INCLUDE  =                           \
    -Iinc/                            \
-   -Ilib/
+   -Iexternal/
 
 SRC      =                           \
    $(wildcard src/DataDecoder/*.cpp) \
