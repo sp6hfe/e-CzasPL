@@ -90,7 +90,7 @@ public:
 
   uint8_t getFecSize() const { return fecSize; }
 
-  Codeword encodeMessage(const Message& message) {
+  Codeword generateCodeword(const Message& message) {
     Codeword codeword{};
 
     // load data
@@ -112,14 +112,21 @@ public:
     return codeword;
   }
 
-  std::optional<Message> decodeMessage(const Codeword& codeword) {
-    // load data
-    uint8_t index{0U};
-    for (auto element : codeword) {
-      recd[index] = static_cast<int>(element);
+  std::optional<Message> recoverMessage(const Codeword& codeword) {
+    // load the data
+    {
+      uint8_t index{0U};
+      for (auto element : codeword) {
+        recd[index++] = static_cast<int>(element);
+      }
+
+      // turn  received codeword into polynomial form
+      for (auto index{0U}; index < codeword.size(); index++) {
+        recd[index] = index_of[recd[index]];
+      }
     }
 
-    // decode message
+    // fix transmission channel errors
     const auto decodeError{decode_rs()};
 
     // extract message
@@ -128,12 +135,21 @@ public:
     }
 
     Message message{};
-    // TODO: tbi
+    {
+      auto index{0U};
+      for (auto& element : message) {
+        element = static_cast<uint16_t>(recd[index++]);
+      }
+    }
+
+    return message;
   }
 
   ReedSolomon();
 
 private:
+  // Variables/functions naming left as in original code
+
   void generate_gf();
 
   void gen_poly();
@@ -141,12 +157,6 @@ private:
   void encode_rs();
 
   bool decode_rs();
-
-  // Variable naming made similar as in original code
-
-  int _alpha[codewordSize];
-  int _index[codewordSize];
-  int _g[codewordSize];
 
   int alpha_to[codewordSize + 1U];
   int index_of[codewordSize + 1U];
