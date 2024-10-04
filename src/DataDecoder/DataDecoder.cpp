@@ -88,64 +88,53 @@ bool DataDecoder::processNewSample(int16_t sample) {
           .leapSecondPositive = false,
           .transmitterState = TransmitterState::NormalOperation};
 
-        // send raw time frame - if callback registered
-        if (_timeFrameRawCallback) {
-          _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        // notify raw time frame extracted from the stream
+        if (_rawTimeFrameCallback) {
+          _rawTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
 
-        auto timeMessageDataValid{true};
+        // apply Reed-Solomon error correction
+        auto timeMessageError{correctTimeFrameErrorsWithRsFec(timeFrame)};
 
-        // lookup and correct errors (Reed-Solomon)
-        {
-          auto rsDataIndex{0U};
-          // not aligned bits S0-SK0
-          for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
-            // get reminder of the previous symbol (bits 7-5)
-            if (frameByteNo != 3U) {
-              _reedSolomonData[rsDataIndex++] += ((timeFrame.at(frameByteNo) >> 5U) & 0x07);
-            }
-            // get full symbol between (bits 4-1)
-            _reedSolomonData[rsDataIndex++] = ((timeFrame.at(frameByteNo) >> 1U) & 0x0F);
-            // get MSb of the next symbol (bit 0)
-            if (frameByteNo != 7U) {
-              _reedSolomonData[rsDataIndex] = ((timeFrame.at(frameByteNo) & 0x01) << 3U);
-            }
-          }
-          // aligned bits in bytes ECC0-ECC2
-          for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
-            _reedSolomonData[rsDataIndex++] = ((timeFrame.at(frameByteNo) >> 4U) & 0x0F);
-            _reedSolomonData[rsDataIndex++] = (timeFrame.at(frameByteNo) & 0x0F);
-          }
-          if (_reedSolomonCodeWordCallback) {
-            _reedSolomonCodeWordCallback({_reedSolomonData, _sampleNo[frameStartIndex.value()]});
-          }
-          // this code shuld update timeMessageDataValid
+        // notify time frame with corrected time data
+        if (not timeMessageError and _rsProcessedTimeFrameCallback) {
+          _rsProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
+
+#ifdef DEBUG
+        if (timeMessageError) {
+          printf("\nE Time data errros not recoverable with Reed-Solomon FEC");
+        }
+#endif
 
         // check CRC8 to see if time data is consistent
-        if (timeMessageDataValid) {
+        if (not timeMessageError) {
           tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
           crc.init();
           for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
             crc.update(timeFrame.at(byteNo));
           }
-          timeMessageDataValid = (crc.getCrc8() == timeFrame.at(11));
+          timeMessageError = (crc.getCrc8() != timeFrame.at(11));
 #ifdef DEBUG
-          if (not timeMessageDataValid) {
-            printf("\nE CRC8 validation of time data failed");
+          if (timeMessageError) {
+            printf("\nE RS-corrected time data CRC8 validation failed");
           }
 #endif
         }
 
-        // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
-        if (not timeMessageDataValid) {
+        // send processed time frame - if callback registered
+        if (not timeMessageError and _crcProcessedTimeFrameCallback) {
+          _crcProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        }
+
+        if (timeMessageError) {
 #ifdef DEBUG
-          printf("\nE Received data is not consistent; dropping the frame");
+          printf("\nE Received time frame data is not consistent; dropping the frame");
 #endif
         }
 
         // proceed if data validation/correction was successful
-        if (timeMessageDataValid) {
+        if (not timeMessageError) {
           // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
           auto timeFrameByteNo{3U};
           for (auto scramblingByte : _scramblingWord) {
@@ -216,11 +205,6 @@ bool DataDecoder::processNewSample(int16_t sample) {
               break;
           }
 
-          // send processed time frame - if callback registered
-          if (_timeFrameProcessedCallback) {
-            _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-          }
-
           // send time data - if callback received
           if (_timeDataCallback) {
             _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
@@ -247,16 +231,16 @@ void DataDecoder::registerTimeDataCallback(TimeDataCallback callback) {
   _timeDataCallback = std::move(callback);
 }
 
-void DataDecoder::registerTimeFrameRawCallback(TimeFrameCallback callback) {
-  _timeFrameRawCallback = std::move(callback);
+void DataDecoder::registerRawTimeFrameCallback(TimeFrameCallback callback) {
+  _rawTimeFrameCallback = std::move(callback);
 }
 
-void DataDecoder::registerTimeFrameProcessedCallback(TimeFrameCallback callback) {
-  _timeFrameProcessedCallback = std::move(callback);
+void DataDecoder::registerRsProcessedTimeFrameCallback(TimeFrameCallback callback) {
+  _rsProcessedTimeFrameCallback = std::move(callback);
 }
 
-void DataDecoder::registerReedSolomonDataWordCallback(ReedSolomonCodeWordCallback callback) {
-  _reedSolomonCodeWordCallback = std::move(callback);
+void DataDecoder::registerCrcProcessedTimeFrameCallback(TimeFrameCallback callback) {
+  _crcProcessedTimeFrameCallback = std::move(callback);
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
@@ -480,6 +464,75 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
+}
+
+bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  RS::Codeword codeword{};
+
+  // lookup and correct time message (S0-SK0) errors using Reed-Solomon FEC data (ECC0-ECC2)
+
+  // 1. Get codeword from the time frame
+  {
+    auto codewordIndex{0U};
+    // not aligned bits S0-SK0
+    for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
+      // get reminder of the previous symbol (stored in bits 7-5)
+      if (frameByteNo != 3U) {
+        codeword.at(codewordIndex++) += ((timeFrame.at(frameByteNo) >> 5U) & 0x07);
+      }
+      // get full symbol in the middle of the byte (bits 4-1)
+      codeword.at(codewordIndex++) = ((timeFrame.at(frameByteNo) >> 1U) & 0x0F);
+      // get MSb of the next symbol (stored in bit 0)
+      if (frameByteNo != 7U) {
+        codeword.at(codewordIndex) = ((timeFrame.at(frameByteNo) & 0x01) << 3U);
+      }
+    }
+    // aligned bits in bytes ECC0-ECC2
+    for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
+      codeword.at(codewordIndex++) = ((timeFrame.at(frameByteNo) >> 4U) & 0x0F);
+      codeword.at(codewordIndex++) = (timeFrame.at(frameByteNo) & 0x0F);
+    }
+  }
+
+  // 2. Recover time message using Reed-Solomon FEC
+  const auto message{_rs.recoverMessage(codeword)};
+  if (not message.has_value()) {
+    return AN_ERROR;
+  }
+
+  // 3. Update the time frame with corrected data
+  {
+    auto messageIndex{0U};
+    // not aligned bits S0-SK0
+    for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
+      uint8_t updatedFrameByte{0U};
+      // set 3 LSb reminder of the current symbol (on 1st pass keep original 3 MSb)
+      if (frameByteNo == 3U) {
+        updatedFrameByte = (timeFrame.at(frameByteNo) &= 0xE0);
+      } else {
+        updatedFrameByte = ((message.value().at(messageIndex++) & 0x07) << 5U);
+      }
+      // set full symbol in the middle of the byte (bits 4-1)
+      updatedFrameByte |= (message.value().at(messageIndex++) << 1U);
+      // set MSb of the next symbol as LSb of the time frame byte (preserve time frame LSb in byte 7)
+      if (frameByteNo == 7U) {
+        updatedFrameByte |= (timeFrame.at(frameByteNo) &= 0x01);
+      } else {
+        updatedFrameByte |= ((message.value().at(messageIndex) & 0x08) >> 3U);
+      }
+      timeFrame.at(frameByteNo) = updatedFrameByte;
+    }
+    // aligned bits in bytes ECC0-ECC2
+    for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
+      timeFrame.at(frameByteNo) = (message.value().at(messageIndex++) << 4U);
+      timeFrame.at(frameByteNo) |= message.value().at(messageIndex++);
+    }
+  }
+
+  return NO_ERROR;
 }
 
 }  // namespace eczas
