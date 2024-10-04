@@ -497,15 +497,15 @@ bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
     }
   }
 
-  // 2. Recover time message using Reed-Solomon FEC
-  const auto message{_rs.recoverMessage(codeword)};
-  if (not message.has_value()) {
+  // 2. Recover possibly faulty codeword
+  const auto recoveryError{_rs.recoverCodeword(codeword)};
+  if (recoveryError) {
     return AN_ERROR;
   }
 
   // 3. Update the time frame with corrected data
   {
-    auto messageIndex{0U};
+    auto codewordIndex{0U};
     // not aligned bits S0-SK0
     for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
       uint8_t updatedFrameByte{0U};
@@ -513,22 +513,22 @@ bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
       if (frameByteNo == 3U) {
         updatedFrameByte = (timeFrame.at(frameByteNo) &= 0xE0);
       } else {
-        updatedFrameByte = ((message.value().at(messageIndex++) & 0x07) << 5U);
+        updatedFrameByte = ((codeword.at(codewordIndex++) & 0x07) << 5U);
       }
       // set full symbol in the middle of the byte (bits 4-1)
-      updatedFrameByte |= (message.value().at(messageIndex++) << 1U);
+      updatedFrameByte |= (codeword.at(codewordIndex++) << 1U);
       // set MSb of the next symbol as LSb of the time frame byte (preserve time frame LSb in byte 7)
       if (frameByteNo == 7U) {
         updatedFrameByte |= (timeFrame.at(frameByteNo) &= 0x01);
       } else {
-        updatedFrameByte |= ((message.value().at(messageIndex) & 0x08) >> 3U);
+        updatedFrameByte |= ((codeword.at(codewordIndex) & 0x08) >> 3U);
       }
       timeFrame.at(frameByteNo) = updatedFrameByte;
     }
     // aligned bits in bytes ECC0-ECC2
     for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
-      timeFrame.at(frameByteNo) = (message.value().at(messageIndex++) << 4U);
-      timeFrame.at(frameByteNo) |= message.value().at(messageIndex++);
+      timeFrame.at(frameByteNo) = (codeword.at(codewordIndex++) << 4U);
+      timeFrame.at(frameByteNo) |= codeword.at(codewordIndex++);
     }
   }
 
