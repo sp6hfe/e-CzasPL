@@ -75,7 +75,7 @@ bool DataDecoder::processNewSample(int16_t sample) {
       const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
 
       // validate time frame static bits (3 MSb of byte 3 is 0b101)
-      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
+      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == TIME_MESSAGE_PREFIX)};
 
       // process time message data
       if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {

@@ -37,6 +37,9 @@ public:
   /// @brief Time frame start byte
   static constexpr uint8_t TIME_FRAME_START_BYTE{0x60};
 
+  /// @brief Time message static prefix
+  static constexpr uint8_t TIME_MESSAGE_PREFIX{0x05};
+
   /// @brief CRC8 polynomial
   static constexpr uint8_t CRC8_POLYNOMIAL{0x07};
 
