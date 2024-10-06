@@ -175,7 +175,13 @@ private:
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
 
+  bool validateTimeFrameStaticFields(const TimeFrame& timeFrame);
+
   bool correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame);
+
+  void descrambleTimeMessage(TimeFrame& timeFrame);
+
+  void extractTimeData(const TimeFrame& timeFrame, TimeData& timeData);
 };
 
 }  // namespace eczas

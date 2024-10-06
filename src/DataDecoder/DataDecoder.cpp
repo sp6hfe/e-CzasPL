@@ -67,27 +67,10 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
     if (timeFrameGetter.has_value()) {
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
-
-      // validate synchronization word
-      const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
-
-      // validate time frame start byte
-      const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
-
-      // validate time frame static bits (3 MSb of byte 3 is 0b101)
-      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == TIME_MESSAGE_PREFIX)};
+      const auto framePrefixError{validateTimeFrameStaticFields(timeFrame)};
 
       // process time message data
-      if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
-        TimeData timeData{
-          .utcTimestamp = 0U,
-          .utcUnixTimestamp = 0U,
-          .offset = TimeZoneOffset::OffsetPlus0h,
-          .timeZoneChangeAnnouncement = false,
-          .leapSecondAnnounced = false,
-          .leapSecondPositive = false,
-          .transmitterState = TransmitterState::NormalOperation};
-
+      if (not framePrefixError) {
         // notify raw time frame extracted from the stream
         if (_rawTimeFrameCallback) {
           _rawTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
@@ -135,75 +118,18 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
         // proceed if data validation/correction was successful
         if (not timeMessageError) {
-          // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
-          auto timeFrameByteNo{3U};
-          for (auto scramblingByte : _scramblingWord) {
-            timeFrame.at(timeFrameByteNo) ^= scramblingByte;
+          descrambleTimeMessage(timeFrame);
 
-            // at the same time grab timestamp data
-            switch (timeFrameByteNo) {
-              case 3U:  // bit 3-7
-                timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
-                break;
-              case 7U:  // MSb only
-                timeData.utcTimestamp <<= 1U;
-                timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
-                break;
-              default:  // full byte
-                timeData.utcTimestamp <<= 8U;
-                timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
-                break;
-            }
+          TimeData timeData{
+            .utcTimestamp = 0U,
+            .utcUnixTimestamp = 0U,
+            .offset = TimeZoneOffset::OffsetPlus0h,
+            .timeZoneChangeAnnouncement = false,
+            .leapSecondAnnounced = false,
+            .leapSecondPositive = false,
+            .transmitterState = TransmitterState::NormalOperation};
 
-            timeFrameByteNo++;
-          }
-
-          // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
-          static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
-
-          timeData.utcTimestamp *= 3U;
-          timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
-
-          // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
-          const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
-          switch (timeOffset) {
-            case 0x01:
-              timeData.offset = TimeZoneOffset::OffsetPlus2h;
-              break;
-            case 0x02:
-              timeData.offset = TimeZoneOffset::OffsetPlus1h;
-              break;
-            case 0x03:
-              timeData.offset = TimeZoneOffset::OffsetPlus3h;
-              break;
-            default:
-              timeData.offset = TimeZoneOffset::OffsetPlus0h;
-              break;
-          }
-
-          // get time zone change announcement (bit TZC(2))
-          timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
-
-          // extract leap second related information (bits LS(4) and LSS(3))
-          timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
-          timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
-
-          // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
-          const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
-          switch (transmitterState) {
-            case 0x01:
-              timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
-              break;
-            case 0x02:
-              timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
-              break;
-            case 0x03:
-              timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
-              break;
-            default:
-              timeData.transmitterState = TransmitterState::NormalOperation;
-              break;
-          }
+          extractTimeData(timeFrame, timeData);
 
           // send time data - if callback received
           if (_timeDataCallback) {
@@ -466,6 +392,31 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
 }
 
+bool DataDecoder::validateTimeFrameStaticFields(const TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  // validate synchronization word
+  const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
+  if (not frameSyncWordOk) {
+    return AN_ERROR;
+  }
+
+  // validate time frame start byte
+  const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+  if (not timeFrameStartByteOk) {
+    return AN_ERROR;
+  }
+
+  // validate time frame static bits (3 MSb of byte 3 is 0b101)
+  const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == TIME_MESSAGE_PREFIX)};
+  if (not timeFrameStaticBitsOk) {
+    return AN_ERROR;
+  }
+
+  return NO_ERROR;
+}
+
 bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
   static constexpr bool NO_ERROR{false};
   static constexpr bool AN_ERROR{true};
@@ -533,6 +484,80 @@ bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
   }
 
   return NO_ERROR;
+}
+
+void DataDecoder::descrambleTimeMessage(TimeFrame& timeFrame) {
+  // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
+  auto timeFrameByteNo{3U};
+  for (const auto scramblingByte : _scramblingWord) {
+    timeFrame.at(timeFrameByteNo++) ^= scramblingByte;
+  }
+}
+
+void DataDecoder::extractTimeData(const TimeFrame& timeFrame, TimeData& timeData) {
+  for (auto timeFrameByteNo{3U}; timeFrameByteNo < 8U; timeFrameByteNo++) {
+    // at the same time grab timestamp data
+    switch (timeFrameByteNo) {
+      case 3U:  // bit 3-7
+        timeData.utcTimestamp = (timeFrame.at(timeFrameByteNo) & 0x1F);
+        break;
+      case 7U:  // MSb only
+        timeData.utcTimestamp <<= 1U;
+        timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+        break;
+      default:  // full byte
+        timeData.utcTimestamp <<= 8U;
+        timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+        break;
+    }
+  }
+
+  // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
+  static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+
+  timeData.utcTimestamp *= 3U;
+  timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+
+  // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
+  const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
+  switch (timeOffset) {
+    case 0x01:
+      timeData.offset = TimeZoneOffset::OffsetPlus2h;
+      break;
+    case 0x02:
+      timeData.offset = TimeZoneOffset::OffsetPlus1h;
+      break;
+    case 0x03:
+      timeData.offset = TimeZoneOffset::OffsetPlus3h;
+      break;
+    default:
+      timeData.offset = TimeZoneOffset::OffsetPlus0h;
+      break;
+  }
+
+  // get time zone change announcement (bit TZC(2))
+  timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
+
+  // extract leap second related information (bits LS(4) and LSS(3))
+  timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
+  timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
+
+  // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
+  const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
+  switch (transmitterState) {
+    case 0x01:
+      timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
+      break;
+    case 0x02:
+      timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
+      break;
+    case 0x03:
+      timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
+      break;
+    default:
+      timeData.transmitterState = TransmitterState::NormalOperation;
+      break;
+  }
 }
 
 }  // namespace eczas
