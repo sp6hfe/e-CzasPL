@@ -5,3 +5,6 @@
 [submodule "external/ReedSolomon"]
 	path = external/ReedSolomon
 	url = https://github.com/sp6hfe/ReedSolomon.git
+[submodule "external/CRC8"]
+	path = external/CRC8
+	url = https://github.com/sp6hfe/CRC8.git

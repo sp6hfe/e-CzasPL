@@ -1,5 +1,16 @@
+/**
+ * @file DataDecoder.cpp
+ * @author Grzegorz Kaczmarek SP6HFE
+ * @brief
+ * @version 0.1
+ * @date 2024-10-07
+ *
+ * @copyright Copyright (c) 2024
+ *
+ */
+
 #include <DataDecoder/DataDecoder.hpp>
-#include <Tools/Crc8.hpp>
+#include <CRC8/CRC8.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
@@ -92,12 +103,11 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
         // check CRC8 to see if time data is consistent
         if (not timeMessageError) {
-          tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
-          crc.init();
+          crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
           for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
             crc.update(timeFrame.at(byteNo));
           }
-          timeMessageError = (crc.getCrc8() != timeFrame.at(11));
+          timeMessageError = (crc.get() != timeFrame.at(11));
 #ifdef DEBUG
           if (timeMessageError) {
             printf("\nE RS-corrected time data CRC8 validation failed");
