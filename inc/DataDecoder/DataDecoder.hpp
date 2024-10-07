@@ -193,6 +193,10 @@ private:
   void descrambleTimeMessage(TimeFrame& timeFrame);
 
   void extractTimeData(const TimeFrame& timeFrame, TimeData& timeData);
+
+  bool validateCrc(const TimeFrame& timeFrame);
+
+  bool correctSk1ErrorWithCrc(TimeFrame& timeFrame);
 };
 
 }  // namespace eczas

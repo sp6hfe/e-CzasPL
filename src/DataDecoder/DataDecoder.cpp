@@ -103,11 +103,8 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
         // check CRC8 to see if time data is consistent
         if (not timeMessageError) {
-          crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
-          for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
-            crc.update(timeFrame.at(byteNo));
-          }
-          timeMessageError = (crc.get() != timeFrame.at(11));
+          timeMessageError = correctSk1ErrorWithCrc(timeFrame);
+
 #ifdef DEBUG
           if (timeMessageError) {
             printf("\nE RS-corrected time data CRC8 validation failed");
@@ -568,6 +565,55 @@ void DataDecoder::extractTimeData(const TimeFrame& timeFrame, TimeData& timeData
       timeData.transmitterState = TransmitterState::NormalOperation;
       break;
   }
+}
+
+bool DataDecoder::validateCrc(const TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  // Time frame byte 11 contain CRC8 hash calculated over data bytes 3-7
+
+  crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+
+  for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
+    crc.update(timeFrame.at(byteNo));
+  }
+
+  if ((crc.get() != timeFrame.at(11))) {
+    return AN_ERROR;
+  }
+
+  return NO_ERROR;
+}
+
+bool DataDecoder::correctSk1ErrorWithCrc(TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  /* After successful time frame data retrieval with Reed-Solomon the only data bit left, not covered with FEC, is SK1.
+     Out of time frame bytes 3-7 the only unknown information is SK1 (0x101 in byte 3 is static and validated already).
+     CRC8 may be calculated from data with SK1 bit value as received and also with its value being flipped.
+     When CRC-8 byte (11th) of the time frame wasn't corrupted SK1 may be recovered using mentioned checks.
+     In case of SK1 retrieval failure it is to be decided by the app if whole time frame should be discarded or the transmitter state
+     should be marked as unknown (SK0-SK1). */
+
+  crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+
+  // 1. Validate received CRC against the time frame data (3-7) as is
+  if (not validateCrc(timeFrame)) {
+    return NO_ERROR;
+  }
+
+  // 2. If no success flip SK1 (LSb) bit and check again
+  timeFrame.at(7) ^= 0x01;
+  if (not validateCrc(timeFrame)) {
+    return NO_ERROR;
+  }
+
+  // 3. If still no success revert SK1 value
+  timeFrame.at(7) ^= 0x01;
+
+  return AN_ERROR;
 }
 
 }  // namespace eczas
