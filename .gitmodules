@@ -1,3 +1,7 @@
 [submodule "external/sp5wwp/e-Czas"]
 	path = external/sp5wwp/e-Czas
 	url = https://github.com/sp5wwp/e-Czas.git
+
+[submodule "external/ReedSolomon"]
+	path = external/ReedSolomon
+	url = https://github.com/sp6hfe/ReedSolomon.git

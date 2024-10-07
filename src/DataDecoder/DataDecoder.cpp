@@ -67,127 +67,69 @@ bool DataDecoder::processNewSample(int16_t sample) {
 
     if (timeFrameGetter.has_value()) {
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
-
-      // validate synchronization word
-      const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
-
-      // validate time frame start byte
-      const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
-
-      // validate time frame static bits (3 MSb of byte 3 is 0b101)
-      const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == 0x05)};
+      const auto framePrefixError{validateTimeFrameStaticFields(timeFrame)};
 
       // process time message data
-      if (frameSyncWordOk and timeFrameStartByteOk and timeFrameStaticBitsOk) {
-        TimeData timeData{
-          .utcTimestamp = 0U,
-          .utcUnixTimestamp = 0U,
-          .offset = TimeZoneOffset::OffsetPlus0h,
-          .timeZoneChangeAnnouncement = false,
-          .leapSecondAnnounced = false,
-          .leapSecondPositive = false,
-          .transmitterState = TransmitterState::NormalOperation};
-
-        // send raw time frame - if callback registered
-        if (_timeFrameRawCallback) {
-          _timeFrameRawCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+      if (not framePrefixError) {
+        // notify raw time frame extracted from the stream
+        if (_rawTimeFrameCallback) {
+          _rawTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
         }
 
-        // check CRC8 to see if any error correction is needed
-        uint8_t crc8 = 0U;
-        {
+        // apply Reed-Solomon error correction
+        auto timeMessageError{correctTimeFrameErrorsWithRsFec(timeFrame)};
+
+        // notify time frame with corrected time data
+        if (not timeMessageError and _rsProcessedTimeFrameCallback) {
+          _rsProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        }
+
+#ifdef DEBUG
+        if (timeMessageError) {
+          printf("\nE Time data errros not recoverable with Reed-Solomon FEC");
+        }
+#endif
+
+        // check CRC8 to see if time data is consistent
+        if (not timeMessageError) {
           tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
           crc.init();
           for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
             crc.update(timeFrame.at(byteNo));
           }
-          crc8 = crc.getCrc8();
-        }
-        const auto timeMessageDataValid{crc8 == timeFrame.at(11)};
-
-        // lookup and correct errors (Reed-Solomon) - to be discussed with GUM
-        if (not timeMessageDataValid) {
+          timeMessageError = (crc.getCrc8() != timeFrame.at(11));
 #ifdef DEBUG
-          printf("\nX CRC8 issue - can't fix errors yet using Reed-Solomon data");
+          if (timeMessageError) {
+            printf("\nE RS-corrected time data CRC8 validation failed");
+          }
+#endif
+        }
+
+        // send processed time frame - if callback registered
+        if (not timeMessageError and _crcProcessedTimeFrameCallback) {
+          _crcProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
+        }
+
+        if (timeMessageError) {
+#ifdef DEBUG
+          printf("\nE Received time frame data is not consistent; dropping the frame");
 #endif
         }
 
         // proceed if data validation/correction was successful
-        if (timeMessageDataValid) {
-          // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
-          auto timeFrameByteNo{3U};
-          for (auto scramblingByte : _scramblingWord) {
-            timeFrame.at(timeFrameByteNo) ^= scramblingByte;
+        if (not timeMessageError) {
+          descrambleTimeMessage(timeFrame);
 
-            // at the same time grab timestamp data
-            switch (timeFrameByteNo) {
-              case 3U:  // bit 3-7
-                timeData.utcTimestamp += (timeFrame.at(timeFrameByteNo) & 0x1F);
-                break;
-              case 7U:  // MSb only
-                timeData.utcTimestamp <<= 1U;
-                timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
-                break;
-              default:  // full byte
-                timeData.utcTimestamp <<= 8U;
-                timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
-                break;
-            }
+          TimeData timeData{
+            .utcTimestamp = 0U,
+            .utcUnixTimestamp = 0U,
+            .offset = TimeZoneOffset::OffsetPlus0h,
+            .timeZoneChangeAnnouncement = false,
+            .leapSecondAnnounced = false,
+            .leapSecondPositive = false,
+            .transmitterState = TransmitterState::NormalOperation};
 
-            timeFrameByteNo++;
-          }
-
-          // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
-          static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
-
-          timeData.utcTimestamp *= 3U;
-          timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
-
-          // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
-          const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
-          switch (timeOffset) {
-            case 0x01:
-              timeData.offset = TimeZoneOffset::OffsetPlus2h;
-              break;
-            case 0x02:
-              timeData.offset = TimeZoneOffset::OffsetPlus1h;
-              break;
-            case 0x03:
-              timeData.offset = TimeZoneOffset::OffsetPlus3h;
-              break;
-            default:
-              timeData.offset = TimeZoneOffset::OffsetPlus0h;
-              break;
-          }
-
-          // get time zone change announcement (bit TZC(2))
-          timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
-
-          // extract leap second related information (bits LS(4) and LSS(3))
-          timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
-          timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
-
-          // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
-          const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
-          switch (transmitterState) {
-            case 0x01:
-              timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
-              break;
-            case 0x02:
-              timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
-              break;
-            case 0x03:
-              timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
-              break;
-            default:
-              timeData.transmitterState = TransmitterState::NormalOperation;
-              break;
-          }
-
-          // send processed time frame - if callback registered
-          if (_timeFrameProcessedCallback) {
-            _timeFrameProcessedCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-          }
+          extractTimeData(timeFrame, timeData);
 
           // send time data - if callback received
           if (_timeDataCallback) {
@@ -215,12 +157,16 @@ void DataDecoder::registerTimeDataCallback(TimeDataCallback callback) {
   _timeDataCallback = std::move(callback);
 }
 
-void DataDecoder::registerTimeFrameRawCallback(TimeFrameCallback callback) {
-  _timeFrameRawCallback = std::move(callback);
+void DataDecoder::registerRawTimeFrameCallback(TimeFrameCallback callback) {
+  _rawTimeFrameCallback = std::move(callback);
 }
 
-void DataDecoder::registerTimeFrameProcessedCallback(TimeFrameCallback callback) {
-  _timeFrameProcessedCallback = std::move(callback);
+void DataDecoder::registerRsProcessedTimeFrameCallback(TimeFrameCallback callback) {
+  _rsProcessedTimeFrameCallback = std::move(callback);
+}
+
+void DataDecoder::registerCrcProcessedTimeFrameCallback(TimeFrameCallback callback) {
+  _crcProcessedTimeFrameCallback = std::move(callback);
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
@@ -444,6 +390,174 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
+}
+
+bool DataDecoder::validateTimeFrameStaticFields(const TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  // validate synchronization word
+  const auto frameSyncWordOk{(timeFrame.at(0) == static_cast<uint8_t>(SYNC_WORD >> 8U)) and (timeFrame.at(1) == static_cast<uint8_t>(SYNC_WORD & 0x00FF))};
+  if (not frameSyncWordOk) {
+    return AN_ERROR;
+  }
+
+  // validate time frame start byte
+  const auto timeFrameStartByteOk{timeFrame.at(2) == TIME_FRAME_START_BYTE};
+  if (not timeFrameStartByteOk) {
+    return AN_ERROR;
+  }
+
+  // validate time frame static bits (3 MSb of byte 3 is 0b101)
+  const auto timeFrameStaticBitsOk{(static_cast<uint8_t>(timeFrame.at(3) >> 5U) == TIME_MESSAGE_PREFIX)};
+  if (not timeFrameStaticBitsOk) {
+    return AN_ERROR;
+  }
+
+  return NO_ERROR;
+}
+
+bool DataDecoder::correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  RS::Codeword codeword{};
+
+  // lookup and correct time message (S0-SK0) errors using Reed-Solomon FEC data (ECC0-ECC2)
+
+  // 1. Get codeword from the time frame
+  {
+    auto codewordIndex{0U};
+    // not aligned bits S0-SK0
+    for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
+      // get reminder of the previous symbol (stored in bits 7-5)
+      if (frameByteNo != 3U) {
+        codeword.at(codewordIndex++) += ((timeFrame.at(frameByteNo) >> 5U) & 0x07);
+      }
+      // get full symbol in the middle of the byte (bits 4-1)
+      codeword.at(codewordIndex++) = ((timeFrame.at(frameByteNo) >> 1U) & 0x0F);
+      // get MSb of the next symbol (stored in bit 0)
+      if (frameByteNo != 7U) {
+        codeword.at(codewordIndex) = ((timeFrame.at(frameByteNo) & 0x01) << 3U);
+      }
+    }
+    // aligned bits in bytes ECC0-ECC2
+    for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
+      codeword.at(codewordIndex++) = ((timeFrame.at(frameByteNo) >> 4U) & 0x0F);
+      codeword.at(codewordIndex++) = (timeFrame.at(frameByteNo) & 0x0F);
+    }
+  }
+
+  // 2. Recover possibly faulty codeword
+  const auto recoveryError{_rs.recoverCodeword(codeword)};
+  if (recoveryError) {
+    return AN_ERROR;
+  }
+
+  // 3. Update the time frame with corrected data
+  {
+    auto codewordIndex{0U};
+    // not aligned bits S0-SK0
+    for (auto frameByteNo{3U}; frameByteNo < 8U; frameByteNo++) {
+      uint8_t updatedFrameByte{0U};
+      // set 3 LSb reminder of the current symbol (on 1st pass keep original 3 MSb)
+      if (frameByteNo == 3U) {
+        updatedFrameByte = (timeFrame.at(frameByteNo) &= 0xE0);
+      } else {
+        updatedFrameByte = ((codeword.at(codewordIndex++) & 0x07) << 5U);
+      }
+      // set full symbol in the middle of the byte (bits 4-1)
+      updatedFrameByte |= (codeword.at(codewordIndex++) << 1U);
+      // set MSb of the next symbol as LSb of the time frame byte (preserve time frame LSb in byte 7)
+      if (frameByteNo == 7U) {
+        updatedFrameByte |= (timeFrame.at(frameByteNo) &= 0x01);
+      } else {
+        updatedFrameByte |= ((codeword.at(codewordIndex) & 0x08) >> 3U);
+      }
+      timeFrame.at(frameByteNo) = updatedFrameByte;
+    }
+    // aligned bits in bytes ECC0-ECC2
+    for (auto frameByteNo{8U}; frameByteNo < 11U; frameByteNo++) {
+      timeFrame.at(frameByteNo) = (codeword.at(codewordIndex++) << 4U);
+      timeFrame.at(frameByteNo) |= codeword.at(codewordIndex++);
+    }
+  }
+
+  return NO_ERROR;
+}
+
+void DataDecoder::descrambleTimeMessage(TimeFrame& timeFrame) {
+  // descramble time message (37 bytes starting at byte 3 bit 4 until byte 7 bit 0; 3 MSb of scrambling word are 0 (0x0A) so they won't affect message's static part)
+  auto timeFrameByteNo{3U};
+  for (const auto scramblingByte : _scramblingWord) {
+    timeFrame.at(timeFrameByteNo++) ^= scramblingByte;
+  }
+}
+
+void DataDecoder::extractTimeData(const TimeFrame& timeFrame, TimeData& timeData) {
+  for (auto timeFrameByteNo{3U}; timeFrameByteNo < 8U; timeFrameByteNo++) {
+    // at the same time grab timestamp data
+    switch (timeFrameByteNo) {
+      case 3U:  // bit 3-7
+        timeData.utcTimestamp = (timeFrame.at(timeFrameByteNo) & 0x1F);
+        break;
+      case 7U:  // MSb only
+        timeData.utcTimestamp <<= 1U;
+        timeData.utcTimestamp += ((timeFrame.at(timeFrameByteNo) & 0x80) ? 1U : 0U);
+        break;
+      default:  // full byte
+        timeData.utcTimestamp <<= 8U;
+        timeData.utcTimestamp += timeFrame.at(timeFrameByteNo);
+        break;
+    }
+  }
+
+  // correct received timestamp as it means the number of 3[s] periods since beginning of the year 2000
+  static constexpr uint32_t secondsBetweenYear1970And2000{946684800U};
+
+  timeData.utcTimestamp *= 3U;
+  timeData.utcUnixTimestamp = timeData.utcTimestamp + secondsBetweenYear1970And2000;
+
+  // get the local time offset (bits TZ0 (6) and TZ1 (5)) - this should be sent other way around for simpler decoding
+  const auto timeOffset{static_cast<uint8_t>((timeFrame.at(7U) >> 5) & 0x03)};
+  switch (timeOffset) {
+    case 0x01:
+      timeData.offset = TimeZoneOffset::OffsetPlus2h;
+      break;
+    case 0x02:
+      timeData.offset = TimeZoneOffset::OffsetPlus1h;
+      break;
+    case 0x03:
+      timeData.offset = TimeZoneOffset::OffsetPlus3h;
+      break;
+    default:
+      timeData.offset = TimeZoneOffset::OffsetPlus0h;
+      break;
+  }
+
+  // get time zone change announcement (bit TZC(2))
+  timeData.timeZoneChangeAnnouncement = ((static_cast<uint8_t>(timeFrame.at(7U) >> 2U) & 0x01) ? true : false);
+
+  // extract leap second related information (bits LS(4) and LSS(3))
+  timeData.leapSecondAnnounced = ((static_cast<uint8_t>(timeFrame.at(7U) >> 4U) & 0x01) ? true : false);
+  timeData.leapSecondPositive = ((static_cast<uint8_t>(timeFrame.at(7U) >> 3U) & 0x01) ? true : false);
+
+  // extract transmitter state (bits SK0 (1) and SK1 (0)) - this should be sent other way around for simpler decoding
+  const auto transmitterState{static_cast<uint8_t>(timeFrame.at(7U) & 0x03)};
+  switch (transmitterState) {
+    case 0x01:
+      timeData.transmitterState = TransmitterState::PlannedMaintenance1Week;
+      break;
+    case 0x02:
+      timeData.transmitterState = TransmitterState::PlannedMaintenance1Day;
+      break;
+    case 0x03:
+      timeData.transmitterState = TransmitterState::PlannedMaintenanceOver1Week;
+      break;
+    default:
+      timeData.transmitterState = TransmitterState::NormalOperation;
+      break;
+  }
 }
 
 }  // namespace eczas

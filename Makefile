@@ -8,11 +8,14 @@ OBJ_DIR  = $(BUILD)/objects
 APP_DIR  = $(BUILD)/apps
 TARGET   = program
 
-INCLUDE  = -Iinc/
-SRC      =                      \
+INCLUDE  =                           \
+   -Iinc/                            \
+   -Iexternal/
+
+SRC      =                           \
    $(wildcard src/DataDecoder/*.cpp) \
-   $(wildcard src/Tools/*.cpp) \
-   $(wildcard src/*.cpp)         \
+   $(wildcard src/Tools/*.cpp)       \
+   $(wildcard src/*.cpp)
 
 OBJECTS  = $(SRC:%.cpp=$(OBJ_DIR)/%.o)
 DEPENDENCIES \

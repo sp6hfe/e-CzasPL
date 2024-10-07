@@ -25,12 +25,17 @@ void printFrameContent(const eczas::DataDecoder::TimeFrame& frame) {
 int main() {
 #ifdef DEBUG
   auto handleRawTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n┌ Raw time frame (at sample %d):       ", frameDetails.second);
+    printf("\n┌ Raw time frame (at sample %d):           ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
 
-  auto handleProcessedTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
-    printf("\n└ Processed time frame (at sample %d): ", frameDetails.second);
+  auto handleReedSolomonProcessedTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> codeWordDetails) {
+    printf("\n├ RS processed time frame (at sample %d):  ", codeWordDetails.second);
+    printFrameContent(codeWordDetails.first);
+  }};
+
+  auto handleCrcProcessedTimeFrameData{[](std::pair<const eczas::DataDecoder::TimeFrame&, uint32_t> frameDetails) {
+    printf("\n└ CRC processed time frame (at sample %d): ", frameDetails.second);
     printFrameContent(frameDetails.first);
   }};
 #endif
@@ -89,8 +94,9 @@ int main() {
   eczas::DataDecoder decoder{RAW_DATA_SAMPLES_PER_BIT};
 
 #ifdef DEBUG
-  decoder.registerTimeFrameRawCallback(handleRawTimeFrameData);
-  decoder.registerTimeFrameProcessedCallback(handleProcessedTimeFrameData);
+  decoder.registerRawTimeFrameCallback(handleRawTimeFrameData);
+  decoder.registerRsProcessedTimeFrameCallback(handleReedSolomonProcessedTimeFrameData);
+  decoder.registerCrcProcessedTimeFrameCallback(handleCrcProcessedTimeFrameData);
 #endif
 
   decoder.registerTimeDataCallback(handleTimeData);

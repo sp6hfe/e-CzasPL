@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ReedSolomon/ReedSolomon.hpp>
+
 #include <functional>
 #include <stdint.h>
 #include <array>
@@ -34,6 +36,9 @@ public:
 
   /// @brief Time frame start byte
   static constexpr uint8_t TIME_FRAME_START_BYTE{0x60};
+
+  /// @brief Time message static prefix
+  static constexpr uint8_t TIME_MESSAGE_PREFIX{0x05};
 
   /// @brief CRC8 polynomial
   static constexpr uint8_t CRC8_POLYNOMIAL{0x07};
@@ -77,6 +82,12 @@ public:
   /// @brief Time frame reception callback (time frame, frame start sample no)
   using TimeFrameCallback = std::function<void(std::pair<const TimeFrame&, uint32_t>)>;
 
+  /// RS(15,9) -> 15 symbols in codeword, 9 symbols of data -> 4bit symbol -> 3 correctable symbols
+  using RS = reedsolomon::ReedSolomon<4U, 3U>;
+
+  /// @brief Reed-Solomon code word reception callback
+  using ReedSolomonCodeWordCallback = std::function<void(std::pair<const RS::Codeword&, uint32_t>)>;
+
   /**
    * @brief Constructor
    *
@@ -99,14 +110,21 @@ public:
    *
    * @param callback The calback
    */
-  void registerTimeFrameRawCallback(TimeFrameCallback callback);
+  void registerRawTimeFrameCallback(TimeFrameCallback callback);
 
   /**
-   * @brief Register processed time frame reception
+   * @brief Register Reed-Solomon processed time frame callback
    *
    * @param callback The callback
    */
-  void registerTimeFrameProcessedCallback(TimeFrameCallback callback);
+  void registerRsProcessedTimeFrameCallback(TimeFrameCallback callback);
+
+  /**
+   * @brief Register CRC processed time frame callback
+   *
+   * @param callback The callback
+   */
+  void registerCrcProcessedTimeFrameCallback(TimeFrameCallback callback);
 
   /**
    * @brief Process new sample
@@ -126,17 +144,22 @@ private:
 
   std::array<uint32_t, STREAM_SIZE> _sampleNo{};
 
-  const std::array<uint8_t, 5> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
+  const std::array<uint8_t, 5U> _scramblingWord{0x0A, 0x47, 0x55, 0x4D, 0x2B};
 
   TimeDataCallback _timeDataCallback{nullptr};
 
-  TimeFrameCallback _timeFrameRawCallback{nullptr};
+  TimeFrameCallback _rawTimeFrameCallback{nullptr};
 
-  TimeFrameCallback _timeFrameProcessedCallback{nullptr};
+  TimeFrameCallback _rsProcessedTimeFrameCallback{nullptr};
+
+  TimeFrameCallback _crcProcessedTimeFrameCallback{nullptr};
 
   uint8_t _streamSamplesPerBit;
 
   uint16_t _meaningfulDataStartIndex{STREAM_SIZE};
+
+  /// Reed-Solomon encoder/decoder
+  RS _rs{};
 
   void calculateSyncWordCorrelation();
 
@@ -151,6 +174,14 @@ private:
   bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
+
+  bool validateTimeFrameStaticFields(const TimeFrame& timeFrame);
+
+  bool correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame);
+
+  void descrambleTimeMessage(TimeFrame& timeFrame);
+
+  void extractTimeData(const TimeFrame& timeFrame, TimeData& timeData);
 };
 
 }  // namespace eczas
