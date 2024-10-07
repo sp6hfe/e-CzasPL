@@ -67,10 +67,17 @@ public:
 
   /// @brief State of the transmitter
   enum class TransmitterState : uint8_t {
-    NormalOperation = 0U,        ///< Normal operation
-    PlannedMaintenance1Day,      ///< Planned maintenance for 1 day
-    PlannedMaintenance1Week,     ///< Planned maintenance for 1 week
-    PlannedMaintenanceOver1Week  ///< Planned maintenance for over 1 week
+    NormalOperation = 0U,         ///< Normal operation
+    PlannedMaintenance1Day,       ///< Planned maintenance for 1 day
+    PlannedMaintenance1Week,      ///< Planned maintenance for 1 week
+    PlannedMaintenanceOver1Week,  ///< Planned maintenance for over 1 week
+    Unknown                       ///< It was not possible to recover the state
+  };
+
+  /// @brief Error during time frame processing
+  enum class TimeFrameProcessingError : uint8_t {
+    RsCorrectionFailed = 0U,  ///< Error during Reed-Solomon data recovery
+    CrcCorrectionFailed,      ///< Error during CRC validation
   };
 
   /// @brief Time message data container
@@ -92,6 +99,9 @@ public:
 
   /// @brief Time frame reception callback (time frame, frame start sample no)
   using TimeFrameCallback = std::function<void(std::pair<const TimeFrame&, uint32_t>)>;
+
+  /// @brief Time frame processing error callback (error)
+  using TimeFrameProcessingErrorCallback = std::function<void(TimeFrameProcessingError)>;
 
   /// RS(15,9) -> 15 symbols in codeword, 9 symbols of data -> 4bit symbol -> 3 correctable symbols
   using RS = reedsolomon::ReedSolomon<4U, 3U>;
@@ -138,6 +148,13 @@ public:
   void registerCrcProcessedTimeFrameCallback(TimeFrameCallback callback);
 
   /**
+   * @brief Register time frame processing error callback
+   *
+   * @param callback The callback
+   */
+  void registerTimeFrameProcessingErrorCallback(TimeFrameProcessingErrorCallback callback);
+
+  /**
    * @brief Process new sample
    * @note Adds sample to internal buffer and calculate sync word correlation.
    *       Looks up for new frames and extract them.
@@ -165,12 +182,16 @@ private:
 
   TimeFrameCallback _crcProcessedTimeFrameCallback{nullptr};
 
+  TimeFrameProcessingErrorCallback _timeFrameProcessingErrorCallback{nullptr};
+
   uint8_t _streamSamplesPerBit;
 
   uint16_t _meaningfulDataStartIndex{STREAM_SIZE};
 
   /// Reed-Solomon encoder/decoder
   RS _rs{};
+
+  void addNewData(int16_t sample, uint32_t sampleNo);
 
   void calculateSyncWordCorrelation();
 
@@ -185,6 +206,8 @@ private:
   bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
 
   std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
+
+  bool processTimeFrameData(TimeFrame& timeFrame, uint16_t frameStartIndex);
 
   bool validateTimeFrameStaticFields(const TimeFrame& timeFrame);
 
