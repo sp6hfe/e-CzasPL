@@ -1,10 +1,13 @@
 # e-CzasPL Radio RF stream data decoder
 
-This module is responsible for retrieving [e-CzasPL Radio][1] time frames and decoding encapsulated UTC(PL) official time messages.  
-Input data is a stream of samples being an information about phase change of the 225[kHz] long wave carrier signal which is broadcast by the Polish Radio (Program Pierwszy Polskiego Radia program).  
-Carrier signal modulation is a PSK ([phase shift keying][2]) with phase deviation of +/- 36 degrees.  
-In order to receive a meaningful data a PSK demodulator is needed to get a bitstream out of the phase information.  
-Project's github is [here][3].
+This module is responsible for retrieving [e-CzasPL Radio][1] time frames and decoding encapsulated UTC(PL) official time + additional information.  
+e-CzasPL's project github is available [here][3].
+
+UTC(PL) time frames are disseminated using long wave AM tramsmission at 225[kHz] where Polish national radio broadcast its flagship program *[Program Pierwszy Polskiego Radia][14]*.  
+AM carrier signal is being PSK-modulated ([phase shift keying][2]) with phase deviation of around +/- 36 degrees. Data bitrate is 50[bps].   
+In order to receive a meaningful data a hardware or software PSK demodulator is needed to get a bitstream out of the phase information (which is not a part of this decoder).  
+
+Input data is a stream of samples being an information about phase change while output is a decoded time data structures.   
 
 ## Time frame
 
@@ -125,7 +128,7 @@ Received 4 bit chunks are coefficients of the code word's polynomial organized a
 
 To play around with the data [here][6] is a good resource.  
 A good explanation of the topic is [here][7], [here][8] and [here][9].  
-Some other valuable resources I have found interesting are [here][10], [here][11], [here][12], and [here][13].
+Some other valuable resources are [here][10], [here][11], [here][12], and [here][13].
 
 ## CRC-8
 
@@ -141,7 +144,7 @@ CRC8 calculation is widely described (i.e. [here][5]) and important information 
 
 ## Time data scrambling
 
-On transmission side bits 27 to 63 of the time frame are scrambled using 0x0A47554D2B scrambling word which in ASCII world mean `\nGUM+`.  
+On transmission side bits 27 to 63 of the time frame are scrambled using `0x0A47554D2B` scrambling word which in ASCII world mean `\nGUM+`.  
 Out of the magic number only 37 least significant bits are used for scrambling.
 
 Scrambling is effectively a process of bits XORing. MSb of the scrambled data is XORed with MSb of the scrambling word, next bit of the data is XORed with next bit of the scrambling word and so on.
@@ -163,8 +166,9 @@ By that time all mechanisms are already in place :)
 [8]: https://berthub.eu/articles/posts/reed-solomon-for-programmers/
 [9]: https://siglead.com/en/technology-eg/reed-solomoncode/
 [10]: https://mathworld.wolfram.com/PrimitivePolynomial.html
-[110]: https://core.ac.uk/download/pdf/16697418.pdf
-[11]: https://aspur.rs/jemit/archive/v3/n3/7.pdf
+[11]: https://core.ac.uk/download/pdf/16697418.pdf
+[12]: https://aspur.rs/jemit/archive/v3/n3/7.pdf
 [13]: http://www.iraj.in/journal/journal_file/journal_pdf/1-605-15767466889-13.pdf
+[14]: https://jedynka.polskieradio.pl/
 
 [timeFrame]: ../../doc/img/eCzasPL_time_frame.jpg "e-CzasPL Radio time frame (source: e-CzasPL documentation)"
