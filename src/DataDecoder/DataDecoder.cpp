@@ -602,7 +602,7 @@ bool DataDecoder::correctSk1ErrorWithCrc(TimeFrame& timeFrame) {
     return NO_ERROR;
   }
 
-  // 3. If still no success revert SK1 value
+  // 3. If still no success revert SK1 value to leave the timeFrame in an original form
   timeFrame.at(7) ^= 0x01;
 
   return AN_ERROR;
