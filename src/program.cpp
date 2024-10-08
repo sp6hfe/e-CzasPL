@@ -1,3 +1,14 @@
+/**
+ * @file program.cpp
+ * @author Grzegorz Kaczmarek SP6HFE
+ * @brief
+ * @version 0.1
+ * @date 2024-10-07
+ *
+ * @copyright Copyright (c) 2024
+ *
+ */
+
 #include <DataDecoder/DataDecoder.hpp>
 #include <Tools/Helpers.hpp>
 
@@ -39,6 +50,20 @@ int main() {
     printFrameContent(frameDetails.first);
   }};
 #endif
+
+  auto handleTimeFrameProcessingError{
+    [](eczas::DataDecoder::TimeFrameProcessingError error) {
+      switch (error) {
+        case eczas::DataDecoder::TimeFrameProcessingError::RsCorrectionFailed:
+          printf("\n└ Error: Time data erros not recoverable using Reed-Solomon FEC");
+          break;
+        case eczas::DataDecoder::TimeFrameProcessingError::CrcCorrectionFailed:
+          printf("\n└ Error: CRC correction failed");
+          break;
+        default:
+          break;
+      }
+    }};
 
   auto handleTimeData{[](std::pair<const eczas::DataDecoder::TimeData&, uint32_t> timeDetails) {
     static constexpr uint32_t secondsInHour{3600U};
@@ -99,6 +124,7 @@ int main() {
   decoder.registerCrcProcessedTimeFrameCallback(handleCrcProcessedTimeFrameData);
 #endif
 
+  decoder.registerTimeFrameProcessingErrorCallback(handleTimeFrameProcessingError);
   decoder.registerTimeDataCallback(handleTimeData);
 
   printf("\ne-CzasPL Radio C++ reference data decoder by SP6HFE\n");

@@ -1,15 +1,22 @@
+/**
+ * @file DataDecoder.cpp
+ * @author Grzegorz Kaczmarek SP6HFE
+ * @brief
+ * @version 0.1
+ * @date 2024-10-07
+ *
+ * @copyright Copyright (c) 2024
+ *
+ */
+
 #include <DataDecoder/DataDecoder.hpp>
-#include <Tools/Crc8.hpp>
+#include <CRC8/CRC8.hpp>
 
 #include <cstdlib>
 #include <stdint.h>
 #include <optional>
 #include <tuple>
 #include <utility>
-
-#ifdef DEBUG
-#include <stdio.h>
-#endif
 
 namespace eczas {
 
@@ -20,121 +27,37 @@ DataDecoder::DataDecoder(uint8_t streamSamplesPerBit) : _streamSamplesPerBit(str
 }
 
 bool DataDecoder::processNewSample(int16_t sample) {
-  // TODO: redo using circular buffer
-
   static auto sampleNo{0U};
 
-  // move meaningful data left
-  if (_meaningfulDataStartIndex < STREAM_SIZE) {
-    if (_meaningfulDataStartIndex == LAST_STREAM_INDEX) {
-      _stream[LAST_STREAM_INDEX - 1U] = _stream[LAST_STREAM_INDEX];
-      _correlator[LAST_STREAM_INDEX - 1U] = _correlator[LAST_STREAM_INDEX];
-      _sampleNo[LAST_STREAM_INDEX - 1U] = _sampleNo[LAST_STREAM_INDEX];
-    } else {
-      if (_meaningfulDataStartIndex != 0U) {
-        _stream[_meaningfulDataStartIndex - 1U] = _stream[_meaningfulDataStartIndex];
-        _correlator[_meaningfulDataStartIndex - 1U] = _correlator[_meaningfulDataStartIndex];
-        _sampleNo[_meaningfulDataStartIndex - 1U] = _sampleNo[_meaningfulDataStartIndex];
-      }
-
-      for (uint16_t streamIndex{_meaningfulDataStartIndex}; streamIndex < LAST_STREAM_INDEX; streamIndex++) {
-        _stream[streamIndex] = _stream[streamIndex + 1U];
-        _correlator[streamIndex] = _correlator[streamIndex + 1U];
-        _sampleNo[streamIndex] = _sampleNo[streamIndex + 1U];
-      }
-    }
-  }
-
-  // add new data
-  _stream[LAST_STREAM_INDEX] = sample;
-  _correlator[LAST_STREAM_INDEX] = false;
-  _sampleNo[LAST_STREAM_INDEX] = sampleNo;
-
-  // update fresh data index
-  if (_meaningfulDataStartIndex) {
-    _meaningfulDataStartIndex--;
-  }
-
-  // process incoming data
+  addNewData(sample, sampleNo);
   calculateSyncWordCorrelation();
 
-  // validate if frame start index is detectable
+  // get the frame
   const auto frameStartIndex{lookupFrameStartIndex()};
-
   if (frameStartIndex.has_value()) {
-    // try to extract the data from the stream
     auto timeFrameGetter{getTimeFrameDataFromStream(frameStartIndex.value())};
-
     if (timeFrameGetter.has_value()) {
       auto [timeFrame, lastIndexOfTheTimeFrame] = timeFrameGetter.value();
-      const auto framePrefixError{validateTimeFrameStaticFields(timeFrame)};
 
-      // process time message data
-      if (not framePrefixError) {
-        // notify raw time frame extracted from the stream
-        if (_rawTimeFrameCallback) {
-          _rawTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-        }
+      // process time frame data
+      const auto timeFrameProcessingError{processTimeFrameData(timeFrame, frameStartIndex.value())};
+      if (not timeFrameProcessingError) {
+        descrambleTimeMessage(timeFrame);
 
-        // apply Reed-Solomon error correction
-        auto timeMessageError{correctTimeFrameErrorsWithRsFec(timeFrame)};
+        TimeData timeData{
+          .utcTimestamp = 0U,
+          .utcUnixTimestamp = 0U,
+          .offset = TimeZoneOffset::OffsetPlus0h,
+          .timeZoneChangeAnnouncement = false,
+          .leapSecondAnnounced = false,
+          .leapSecondPositive = false,
+          .transmitterState = TransmitterState::NormalOperation};
 
-        // notify time frame with corrected time data
-        if (not timeMessageError and _rsProcessedTimeFrameCallback) {
-          _rsProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-        }
+        extractTimeData(timeFrame, timeData);
 
-#ifdef DEBUG
-        if (timeMessageError) {
-          printf("\nE Time data errros not recoverable with Reed-Solomon FEC");
-        }
-#endif
-
-        // check CRC8 to see if time data is consistent
-        if (not timeMessageError) {
-          tools::Crc8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
-          crc.init();
-          for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
-            crc.update(timeFrame.at(byteNo));
-          }
-          timeMessageError = (crc.getCrc8() != timeFrame.at(11));
-#ifdef DEBUG
-          if (timeMessageError) {
-            printf("\nE RS-corrected time data CRC8 validation failed");
-          }
-#endif
-        }
-
-        // send processed time frame - if callback registered
-        if (not timeMessageError and _crcProcessedTimeFrameCallback) {
-          _crcProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex.value()]});
-        }
-
-        if (timeMessageError) {
-#ifdef DEBUG
-          printf("\nE Received time frame data is not consistent; dropping the frame");
-#endif
-        }
-
-        // proceed if data validation/correction was successful
-        if (not timeMessageError) {
-          descrambleTimeMessage(timeFrame);
-
-          TimeData timeData{
-            .utcTimestamp = 0U,
-            .utcUnixTimestamp = 0U,
-            .offset = TimeZoneOffset::OffsetPlus0h,
-            .timeZoneChangeAnnouncement = false,
-            .leapSecondAnnounced = false,
-            .leapSecondPositive = false,
-            .transmitterState = TransmitterState::NormalOperation};
-
-          extractTimeData(timeFrame, timeData);
-
-          // send time data - if callback received
-          if (_timeDataCallback) {
-            _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
-          }
+        // notify time data
+        if (_timeDataCallback) {
+          _timeDataCallback({timeData, _sampleNo[frameStartIndex.value()]});
         }
 
         // move stream meaningful data index beyond already extracted time frame (to prevent repeated detection)
@@ -167,6 +90,45 @@ void DataDecoder::registerRsProcessedTimeFrameCallback(TimeFrameCallback callbac
 
 void DataDecoder::registerCrcProcessedTimeFrameCallback(TimeFrameCallback callback) {
   _crcProcessedTimeFrameCallback = std::move(callback);
+}
+
+void DataDecoder::registerTimeFrameProcessingErrorCallback(TimeFrameProcessingErrorCallback callback) {
+  _timeFrameProcessingErrorCallback = std::move(callback);
+}
+
+void DataDecoder::addNewData(int16_t sample, uint32_t sampleNo) {
+  // TODO: redo using circular buffer
+
+  // move meaningful data left
+  if (_meaningfulDataStartIndex < STREAM_SIZE) {
+    if (_meaningfulDataStartIndex == LAST_STREAM_INDEX) {
+      _stream[LAST_STREAM_INDEX - 1U] = _stream[LAST_STREAM_INDEX];
+      _correlator[LAST_STREAM_INDEX - 1U] = _correlator[LAST_STREAM_INDEX];
+      _sampleNo[LAST_STREAM_INDEX - 1U] = _sampleNo[LAST_STREAM_INDEX];
+    } else {
+      if (_meaningfulDataStartIndex != 0U) {
+        _stream[_meaningfulDataStartIndex - 1U] = _stream[_meaningfulDataStartIndex];
+        _correlator[_meaningfulDataStartIndex - 1U] = _correlator[_meaningfulDataStartIndex];
+        _sampleNo[_meaningfulDataStartIndex - 1U] = _sampleNo[_meaningfulDataStartIndex];
+      }
+
+      for (uint16_t streamIndex{_meaningfulDataStartIndex}; streamIndex < LAST_STREAM_INDEX; streamIndex++) {
+        _stream[streamIndex] = _stream[streamIndex + 1U];
+        _correlator[streamIndex] = _correlator[streamIndex + 1U];
+        _sampleNo[streamIndex] = _sampleNo[streamIndex + 1U];
+      }
+    }
+  }
+
+  // add new data
+  _stream[LAST_STREAM_INDEX] = sample;
+  _correlator[LAST_STREAM_INDEX] = false;
+  _sampleNo[LAST_STREAM_INDEX] = sampleNo;
+
+  // update fresh data index
+  if (_meaningfulDataStartIndex) {
+    _meaningfulDataStartIndex--;
+  }
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
@@ -219,9 +181,7 @@ void DataDecoder::calculateSyncWordCorrelation() {
 
 bool DataDecoder::isSampleValueOutOfNoiseRegion(uint16_t index) {
   if (index >= STREAM_SIZE) {
-#ifdef DEBUG
-    printf("\nE: Sample index is out of range");
-#endif
+    // Sample index is out of range
     return false;
   }
 
@@ -376,9 +336,7 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
     const auto dataByteGetter{getByteFromStream(byteStartIndex, startingBitValueIsOne)};
 
     if (not dataByteGetter.has_value()) {
-#ifdef DEBUG
-      printf("\nE: Can't get byte from stream starting at index: %d", byteStartIndex);
-#endif
+      // Can't get byte from the stream
       return {};
     }
 
@@ -390,6 +348,47 @@ std::optional<std::tuple<DataDecoder::TimeFrame, uint16_t>> DataDecoder::getTime
   }
 
   return std::make_tuple(dataFrame, lastIndexOfTheTimeFrame);
+}
+
+bool DataDecoder::processTimeFrameData(TimeFrame& timeFrame, uint16_t frameStartIndex) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  if (validateTimeFrameStaticFields(timeFrame)) {
+    return AN_ERROR;
+  }
+
+  // notify raw time frame extracted from the stream
+  if (_rawTimeFrameCallback) {
+    _rawTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex]});
+  }
+
+  if (correctTimeFrameErrorsWithRsFec(timeFrame)) {
+    if (_timeFrameProcessingErrorCallback) {
+      _timeFrameProcessingErrorCallback(TimeFrameProcessingError::RsCorrectionFailed);
+    }
+    return AN_ERROR;
+  }
+
+  // notify time frame with RS corrected time data
+  if (_rsProcessedTimeFrameCallback) {
+    _rsProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex]});
+  }
+
+  if (correctSk1ErrorWithCrc(timeFrame)) {
+    // TODO: add option to not throw time frame away if transmitter state is not as important
+    if (_timeFrameProcessingErrorCallback) {
+      _timeFrameProcessingErrorCallback(TimeFrameProcessingError::CrcCorrectionFailed);
+    }
+    return AN_ERROR;
+  }
+
+  // notify time frame with CRC corrected SK1 bit
+  if (_crcProcessedTimeFrameCallback) {
+    _crcProcessedTimeFrameCallback({timeFrame, _sampleNo[frameStartIndex]});
+  }
+
+  return NO_ERROR;
 }
 
 bool DataDecoder::validateTimeFrameStaticFields(const TimeFrame& timeFrame) {
@@ -498,7 +497,7 @@ void DataDecoder::extractTimeData(const TimeFrame& timeFrame, TimeData& timeData
   for (auto timeFrameByteNo{3U}; timeFrameByteNo < 8U; timeFrameByteNo++) {
     // at the same time grab timestamp data
     switch (timeFrameByteNo) {
-      case 3U:  // bit 3-7
+      case 3U:  // 5 LSb only
         timeData.utcTimestamp = (timeFrame.at(timeFrameByteNo) & 0x1F);
         break;
       case 7U:  // MSb only
@@ -558,6 +557,55 @@ void DataDecoder::extractTimeData(const TimeFrame& timeFrame, TimeData& timeData
       timeData.transmitterState = TransmitterState::NormalOperation;
       break;
   }
+}
+
+bool DataDecoder::validateCrc(const TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  // Time frame byte 11 contain CRC8 hash calculated over data bytes 3-7
+
+  crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+
+  for (auto byteNo{3U}; byteNo < 8U; byteNo++) {
+    crc.update(timeFrame.at(byteNo));
+  }
+
+  if ((crc.get() != timeFrame.at(11))) {
+    return AN_ERROR;
+  }
+
+  return NO_ERROR;
+}
+
+bool DataDecoder::correctSk1ErrorWithCrc(TimeFrame& timeFrame) {
+  static constexpr bool NO_ERROR{false};
+  static constexpr bool AN_ERROR{true};
+
+  /* After successful time frame data retrieval with Reed-Solomon the only data bit left, not covered with FEC, is SK1.
+     Out of time frame bytes 3-7 the only unknown information is SK1 (0x101 in byte 3 is static and validated already).
+     CRC8 may be calculated from data with SK1 bit value as received and also with its value being flipped.
+     When CRC-8 byte (11th) of the time frame wasn't corrupted SK1 may be recovered using mentioned checks.
+     In case of SK1 retrieval failure it is to be decided by the app if whole time frame should be discarded or the transmitter state
+     should be marked as unknown (SK0-SK1). */
+
+  crc::CRC8 crc{CRC8_POLYNOMIAL, CRC8_INIT_VALUE};
+
+  // 1. Validate received CRC against the time frame data (3-7) as is
+  if (not validateCrc(timeFrame)) {
+    return NO_ERROR;
+  }
+
+  // 2. If no success flip SK1 (LSb) bit and check again
+  timeFrame.at(7) ^= 0x01;
+  if (not validateCrc(timeFrame)) {
+    return NO_ERROR;
+  }
+
+  // 3. If still no success revert SK1 value to leave the timeFrame in an original form
+  timeFrame.at(7) ^= 0x01;
+
+  return AN_ERROR;
 }
 
 }  // namespace eczas

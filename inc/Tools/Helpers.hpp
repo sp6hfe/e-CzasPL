@@ -1,3 +1,14 @@
+/**
+ * @file Helpers.hpp
+ * @author Grzegorz Kaczmarek SP6HFE
+ * @brief
+ * @version 0.1
+ * @date 2024-10-07
+ *
+ * @copyright Copyright (c) 2024
+ *
+ */
+
 #pragma once
 
 #include <stdint.h>
