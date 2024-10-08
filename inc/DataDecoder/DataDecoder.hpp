@@ -188,6 +188,10 @@ private:
 
   uint16_t _meaningfulDataStartIndex{STREAM_SIZE};
 
+  DataDecoder::TimeFrame _timeFrame{};
+
+  TimeData _timeData{};
+
   /// Reed-Solomon encoder/decoder
   RS _rs{};
 
@@ -197,29 +201,25 @@ private:
 
   bool isSampleValueOutOfNoiseRegion(uint16_t index);
 
-  std::optional<uint16_t> detectSyncWordStartIndexByCorrelation();
-
-  std::optional<uint16_t> lookupFrameStartIndex();
+  bool syncWordDetectedByCorrelation();
 
   std::optional<std::tuple<uint8_t, uint16_t, bool>> getByteFromStream(uint16_t startIndex, bool initialBitValueIsOne);
 
-  bool validateSyncWordLocationInStream(uint16_t syncWordStartIndex);
+  std::optional<uint16_t> getTimeFrameDataFromStream();
 
-  std::optional<std::tuple<TimeFrame, uint16_t>> getTimeFrameDataFromStream(uint16_t dataStartIndex);
+  bool processTimeFrameData();
 
-  bool processTimeFrameData(TimeFrame& timeFrame, uint16_t frameStartIndex);
+  bool validateTimeFrameStaticFields();
 
-  bool validateTimeFrameStaticFields(const TimeFrame& timeFrame);
+  bool correctTimeFrameErrorsWithRsFec();
 
-  bool correctTimeFrameErrorsWithRsFec(TimeFrame& timeFrame);
+  void descrambleTimeMessage();
 
-  void descrambleTimeMessage(TimeFrame& timeFrame);
+  void extractTimeData();
 
-  void extractTimeData(const TimeFrame& timeFrame, TimeData& timeData);
+  bool validateCrc();
 
-  bool validateCrc(const TimeFrame& timeFrame);
-
-  bool correctSk1ErrorWithCrc(TimeFrame& timeFrame);
+  bool correctSk1ErrorWithCrc();
 };
 
 }  // namespace eczas
