@@ -132,44 +132,35 @@ void DataDecoder::addNewData(int16_t sample, uint32_t sampleNo) {
 }
 
 void DataDecoder::calculateSyncWordCorrelation() {
-  /* Calculate correlation against 16 bit sync word 0x5555
-     - LSb of the sync word is the last sample in the stream buffer
-     - sync word bit samples used in calculation are spaced in buffer with _streamSamplesPerBit
-     - MSb of the sync word is located (15 * _streamSamplesPerBit) bits back with respect to LSb sample
-     - correlation is placed at sync word's MSb index to ease further localization of the frame start
+  /* Calculate correlation against 16 bit sync word 0x5555 (alternating bit values)
+     - LSb of the sync word is the last sample in the stream buffer and should be 1,
+     - sync word bit samples used in calculation are spaced in buffer with _streamSamplesPerBit,
+     - MSb of the sync word is located (15 * _streamSamplesPerBit) bits back with respect to LSb sample,
+     - correlation is placed at sync word's MSb index to ease further localization of the frame start,
+     - carrier phase changes are expected to be cyclic (no value stalling causing stream sample value to be around 0),
+     - stream samples representing sync word bits are expected to have significant values,
 
      Data frames are separated with some fill-up time so they can start at full second.
      Before beginning of the sync word stream values are around value 0 (no carrier phase change).
-     MSb of sync word is not detectable from the stream values due to no phase change observed (but 0-value is usable later on).
      Drop in stream's sample value below 0 (and lower hysteresis region) is an indication of the start of bit value 0 transmission.
      Jump in stream's sample value above 0 (and higher hysteresis region) is an indication of the start of bit value 1 transmission.
+     Each time frame starts with an indication of the bit value 0 being transmitted.
      In order to detect where sync word 0x5555 lay in the stream a correlation estimate is calculated on each new signal sample recption. */
 
   bool correlationDetected{true};
-
-  // traverse stream to correlate according to 16 points spaced equally (every _streamSamplesPerBit)
   auto streamIndexToSyncWordBit{LAST_STREAM_INDEX};
 
-  /* due to sync word value (alternating bit values) carrier phase changes are expected to be cyclic;
-     sync word's LSb is located at stream end, more significant bits are accessed by jumping back by _streamSamplesPerBit */
-  for (uint8_t syncWordBitNo{0U}; syncWordBitNo < SYNC_WORD_BITS_NO; syncWordBitNo++) {
-    // for the sync word area stream samples should have meaningful magnitude
-    if (not isSampleValueOutOfNoiseRegion(streamIndexToSyncWordBit)) {
-      correlationDetected = false;
-      break;
+  if (_stream[streamIndexToSyncWordBit] > 0) {
+    for (uint8_t syncWordBitNo{0U}; syncWordBitNo < SYNC_WORD_BITS_NO; syncWordBitNo++) {
+      if (not isSampleValueOutOfNoiseRegion(streamIndexToSyncWordBit)) {
+        correlationDetected = false;
+        break;
+      }
+      streamIndexToSyncWordBit -= _streamSamplesPerBit;
     }
-
-    const auto syncWordBitValue{((SYNC_WORD >> syncWordBitNo) & static_cast<uint16_t>(0x0001)) != 0U};
-    const auto streamBitValue{_stream[streamIndexToSyncWordBit] > 0};
-
-    // they should exactly follow sync word's bit pattern
-    if (syncWordBitValue != streamBitValue) {
-      correlationDetected = false;
-      break;
-    }
-
-    // to reach next sample a jump back is needed
-    streamIndexToSyncWordBit -= _streamSamplesPerBit;
+  } else {
+    // stream sample for sync word LSb wasn't indicating it may be 1
+    correlationDetected = false;
   }
 
   // store correlation value into the buffer at sync word's start index
